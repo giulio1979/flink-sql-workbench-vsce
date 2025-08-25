@@ -1,0 +1,398 @@
+{
+  "name": "flink-sql-workbench",
+  "displayName": "Flink SQL Workbench",
+  "description": "VS Code extension for editing and executing Flink SQL with gateway session management",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.103.0"
+  },
+  "categories": [
+    "Data Science",
+    "Other"
+  ],
+  "activationEvents": [
+    "onLanguage:sql"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "flinksql",
+        "aliases": ["Flink SQL", "flinksql"],
+        "extensions": [".flink.sql"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "customEditors": [
+      {
+        "viewType": "flink-sql-workbench.sqlEditor",
+        "displayName": "Flink SQL Editor",
+        "selector": [
+          {
+            "filenamePattern": "*.flink.sql"
+          }
+        ],
+        "priority": "default"
+      }
+    ],
+    "commands": [
+      {
+        "command": "flink-sql-workbench.executeQuery",
+        "title": "Execute Flink SQL Query",
+        "icon": "$(play)"
+      },
+      {
+        "command": "flink-sql-workbench.connectToGateway",
+        "title": "Connect to Flink Gateway"
+      },
+      {
+        "command": "flink-sql-workbench.disconnectFromGateway",
+        "title": "Disconnect from Flink Gateway"
+      },
+      {
+        "command": "flink-sql-workbench.showResults",
+        "title": "Show Query Results"
+      },
+      {
+        "command": "flink-sql-workbench.refreshSessions",
+        "title": "Refresh Session",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "flink-sql-workbench.createSession",
+        "title": "Create New Session",
+        "icon": "$(add)"
+      },
+      {
+        "command": "flink-sql-workbench.deleteSession",
+        "title": "Delete Current Session",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "flink-sql-workbench.viewSessionInfo",
+        "title": "View Session Info",
+        "icon": "$(info)"
+      },
+      {
+        "command": "flink-sql-workbench.showOutput",
+        "title": "Show Flink SQL Output",
+        "icon": "$(output)"
+      },
+      {
+        "command": "flink-sql-workbench.refreshCatalog",
+        "title": "Refresh Catalog",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "flink-sql-workbench.setCatalog",
+        "title": "Set as Current Catalog"
+      },
+      {
+        "command": "flink-sql-workbench.insertTableReference",
+        "title": "Insert Reference"
+      },
+      {
+        "command": "flink-sql-workbench.refreshJobs",
+        "title": "Refresh Jobs",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "flink-sql-workbench.toggleJobsAutoRefresh",
+        "title": "Toggle Auto Refresh",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "flink-sql-workbench.stopJob",
+        "title": "Stop Job"
+      },
+      {
+        "command": "flink-sql-workbench.cancelJob",
+        "title": "Cancel Job"
+      },
+      {
+        "command": "flink-sql-workbench.openSettings",
+        "title": "Open Flink SQL Workbench Settings",
+        "icon": "$(gear)"
+      }
+    ],
+    "views": {
+      "explorer": [
+        {
+          "id": "flinkSqlSessions",
+          "name": "Flink SQL Session",
+          "when": "workspaceHasFlinkSqlFiles"
+        },
+        {
+          "id": "flinkSqlCatalog",
+          "name": "Flink SQL Catalog",
+          "when": "workspaceHasFlinkSqlFiles",
+          "icon": "$(database)"
+        },
+        {
+          "id": "flinkSqlJobs",
+          "name": "Flink SQL Jobs",
+          "when": "workspaceHasFlinkSqlFiles",
+          "icon": "$(play)"
+        },
+        {
+          "id": "flinkSqlSettings",
+          "name": "Flink SQL Settings",
+          "when": "workspaceHasFlinkSqlFiles",
+          "icon": "$(gear)"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "flinkSqlSessions",
+        "contents": "No Flink SQL Gateway connection.\n[Connect to Gateway](command:flink-sql-workbench.connectToGateway)\nTo learn more about Flink SQL Gateway [read our docs](https://nightlies.apache.org/flink/flink-docs-release-1.17/docs/dev/table/sql-gateway/overview/).",
+        "when": "!flinkGatewayConnected"
+      },
+      {
+        "view": "flinkSqlSessions",
+        "contents": "Connected to Gateway but no active session.\n[Create Session](command:flink-sql-workbench.createSession)",
+        "when": "flinkGatewayConnected && !hasActiveSession"
+      },
+      {
+        "view": "flinkSqlCatalog",
+        "contents": "No Flink SQL Gateway connection.\n[Connect to Gateway](command:flink-sql-workbench.connectToGateway)",
+        "when": "!flinkGatewayConnected"
+      },
+      {
+        "view": "flinkSqlJobs",
+        "contents": "No Flink SQL Gateway connection.\n[Connect to Gateway](command:flink-sql-workbench.connectToGateway)",
+        "when": "!flinkGatewayConnected"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "flink-sql-workbench.executeQuery",
+          "when": "resourceExtname == .sql && resourceFilename =~ /\\.flink\\.sql$/",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "flink-sql-workbench.executeQuery",
+          "when": "resourceExtname == .sql && resourceFilename =~ /\\.flink\\.sql$/"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "flink-sql-workbench.refreshSessions",
+          "when": "view == flinkSqlSessions",
+          "group": "navigation"
+        },
+        {
+          "command": "flink-sql-workbench.createSession",
+          "when": "view == flinkSqlSessions && flinkGatewayConnected",
+          "group": "navigation"
+        },
+        {
+          "command": "flink-sql-workbench.refreshCatalog",
+          "when": "view == flinkSqlCatalog",
+          "group": "navigation"
+        },
+        {
+          "command": "flink-sql-workbench.refreshJobs",
+          "when": "view == flinkSqlJobs",
+          "group": "navigation"
+        },
+        {
+          "command": "flink-sql-workbench.toggleJobsAutoRefresh",
+          "when": "view == flinkSqlJobs",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "flink-sql-workbench.viewSessionInfo",
+          "when": "view == flinkSqlSessions && viewItem == session",
+          "group": "inline"
+        },
+        {
+          "command": "flink-sql-workbench.deleteSession",
+          "when": "view == flinkSqlSessions && viewItem == session",
+          "group": "inline"
+        },
+        {
+          "command": "flink-sql-workbench.setCatalog",
+          "when": "view == flinkSqlCatalog && viewItem == catalog"
+        },
+        {
+          "command": "flink-sql-workbench.insertTableReference",
+          "when": "view == flinkSqlCatalog && (viewItem == catalog || viewItem == database || viewItem == table)"
+        },
+        {
+          "command": "flink-sql-workbench.stopJob",
+          "when": "view == flinkSqlJobs && viewItem == runningJob"
+        },
+        {
+          "command": "flink-sql-workbench.cancelJob",
+          "when": "view == flinkSqlJobs && viewItem == runningJob"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Flink SQL Workbench",
+      "properties": {
+        "flinkSqlWorkbench.gateway.url": {
+          "type": "string",
+          "default": "http://localhost:8083",
+          "description": "Full URL to Flink SQL Gateway (e.g., http://localhost:8083 or https://flink.example.com:8083)"
+        },
+        "flinkSqlWorkbench.gateway.useProxy": {
+          "type": "boolean",
+          "default": false,
+          "description": "Use proxy for requests to avoid CORS issues"
+        },
+        "flinkSqlWorkbench.gateway.apiVersion": {
+          "type": "string",
+          "enum": ["v1", "v2", "auto"],
+          "default": "auto",
+          "description": "Flink Gateway API version to use (auto-detect by default)"
+        },
+        "flinkSqlWorkbench.gateway.authentication.username": {
+          "type": "string",
+          "default": "",
+          "description": "Username for basic authentication (optional)"
+        },
+        "flinkSqlWorkbench.gateway.authentication.password": {
+          "type": "string",
+          "default": "",
+          "description": "Password for basic authentication (optional)"
+        },
+        "flinkSqlWorkbench.gateway.authentication.apiToken": {
+          "type": "string",
+          "default": "",
+          "description": "Bearer token for API authentication (optional)"
+        },
+        "flinkSqlWorkbench.gateway.sessionName": {
+          "type": "string",
+          "default": "vscode-session",
+          "description": "Default session name for Flink Gateway"
+        },
+        "flinkSqlWorkbench.gateway.timeout": {
+          "type": "number",
+          "default": 30000,
+          "description": "Request timeout in milliseconds"
+        },
+        "flinkSqlWorkbench.gateway.maxRetries": {
+          "type": "number",
+          "default": 3,
+          "description": "Maximum number of retry attempts for failed requests"
+        },
+        "flinkSqlWorkbench.session.properties": {
+          "type": "object",
+          "default": {
+            "execution.runtime-mode": "streaming",
+            "table.exec.resource.default-parallelism": "1",
+            "execution.checkpointing.interval": "10s"
+          },
+          "description": "Default session properties for Flink SQL Gateway sessions",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "flinkSqlWorkbench.session.autoReconnect": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically reconnect to gateway if connection is lost"
+        },
+        "flinkSqlWorkbench.session.keepAliveInterval": {
+          "type": "number",
+          "default": 300000,
+          "description": "Keep-alive interval for sessions in milliseconds (5 minutes)"
+        },
+        "flinkSqlWorkbench.editor.autoComplete": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable auto-completion for Flink SQL"
+        },
+        "flinkSqlWorkbench.editor.autoSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically save files when executing queries"
+        },
+        "flinkSqlWorkbench.results.maxRows": {
+          "type": "number",
+          "default": 1000,
+          "description": "Maximum number of rows to display in results"
+        },
+        "flinkSqlWorkbench.results.pageSize": {
+          "type": "number",
+          "default": 100,
+          "description": "Number of rows to fetch per page"
+        },
+        "flinkSqlWorkbench.results.autoRefresh": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically refresh results for streaming queries"
+        },
+        "flinkSqlWorkbench.results.refreshInterval": {
+          "type": "number",
+          "default": 5000,
+          "description": "Auto-refresh interval for results in milliseconds"
+        },
+        "flinkSqlWorkbench.logging.level": {
+          "type": "string",
+          "enum": ["trace", "debug", "info", "warn", "error"],
+          "default": "info",
+          "description": "Logging level for the extension"
+        },
+        "flinkSqlWorkbench.logging.enableNetworkLogging": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable detailed network request/response logging"
+        },
+        "flinkSqlWorkbench.ui.theme": {
+          "type": "string",
+          "enum": ["auto", "dark", "light"],
+          "default": "auto",
+          "description": "Theme for Flink SQL Workbench panels (follows VS Code theme by default)"
+        },
+        "flinkSqlWorkbench.catalog.autoRefresh": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically refresh catalog when connecting"
+        },
+        "flinkSqlWorkbench.jobs.autoRefresh": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically refresh jobs list"
+        },
+        "flinkSqlWorkbench.jobs.refreshInterval": {
+          "type": "number",
+          "default": 10000,
+          "description": "Jobs auto-refresh interval in milliseconds"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "webpack",
+    "watch": "webpack --watch",
+    "package": "webpack --mode production --devtool hidden-source-map",
+    "compile-tests": "tsc -p . --outDir out",
+    "watch-tests": "tsc -p . -w --outDir out",
+    "pretest": "npm run compile-tests && npm run compile && npm run lint",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.103.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "22.x",
+    "@typescript-eslint/eslint-plugin": "^8.39.0",
+    "@typescript-eslint/parser": "^8.39.0",
+    "eslint": "^9.32.0",
+    "typescript": "^5.9.2",
+    "ts-loader": "^9.5.2",
+    "webpack": "^5.101.0",
+    "webpack-cli": "^6.0.1",
+    "@vscode/test-cli": "^0.0.11",
+    "@vscode/test-electron": "^2.5.2"
+  }
+}
