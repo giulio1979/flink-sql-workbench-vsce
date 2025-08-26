@@ -10,9 +10,6 @@
     "Data Science",
     "Other"
   ],
-  "activationEvents": [
-    "onLanguage:sql"
-  ],
   "main": "./dist/extension.js",
   "contributes": {
     "languages": [
@@ -32,7 +29,7 @@
             "filenamePattern": "*.flink.sql"
           }
         ],
-        "priority": "default"
+        "priority": "option"
       }
     ],
     "commands": [
@@ -40,6 +37,11 @@
         "command": "flink-sql-workbench.executeQuery",
         "title": "Execute Flink SQL Query",
         "icon": "$(play)"
+      },
+      {
+        "command": "flink-sql-workbench.executeAllQueries",
+        "title": "Execute All Queries",
+        "icon": "$(play-circle)"
       },
       {
         "command": "flink-sql-workbench.connectToGateway",
@@ -107,12 +109,43 @@
       },
       {
         "command": "flink-sql-workbench.cancelJob",
-        "title": "Cancel Job"
+        "title": "Cancel Job",
+        "icon": "$(stop)"
       },
       {
         "command": "flink-sql-workbench.openSettings",
         "title": "Open Flink SQL Workbench Settings",
         "icon": "$(gear)"
+      },
+      {
+        "command": "flink-sql-workbench.testNewConnection",
+        "title": "🔧 Test New Services Connection",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "flink-sql-workbench.executeSelectedNew",
+        "title": "🚀 Execute SQL (New Services)",
+        "icon": "$(rocket)"
+      },
+      {
+        "command": "flink-sql-workbench.showSessionInfo",
+        "title": "📊 Show Session Info (New)",
+        "icon": "$(info)"
+      },
+      {
+        "command": "flink-sql-workbench.refreshSessionNew",
+        "title": "🔄 Refresh Session (New)",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "flink-sql-workbench.cancelAllNew",
+        "title": "🛑 Cancel All Statements (New)",
+        "icon": "$(stop-circle)"
+      },
+      {
+        "command": "flink-sql-workbench.showNewOutput",
+        "title": "📋 Show New Services Output",
+        "icon": "$(output)"
       }
     ],
     "views": {
@@ -133,12 +166,6 @@
           "name": "Flink SQL Jobs",
           "when": "workspaceHasFlinkSqlFiles",
           "icon": "$(play)"
-        },
-        {
-          "id": "flinkSqlSettings",
-          "name": "Flink SQL Settings",
-          "when": "workspaceHasFlinkSqlFiles",
-          "icon": "$(gear)"
         }
       ]
     },
@@ -168,14 +195,47 @@
       "editor/title": [
         {
           "command": "flink-sql-workbench.executeQuery",
-          "when": "resourceExtname == .sql && resourceFilename =~ /\\.flink\\.sql$/",
+          "when": "resourceLangId == flinksql",
+          "group": "navigation"
+        },
+        {
+          "command": "flink-sql-workbench.executeAllQueries",
+          "when": "resourceLangId == flinksql",
+          "group": "navigation"
+        },
+        {
+          "command": "flink-sql-workbench.executeSelectedNew",
+          "when": "resourceLangId == flinksql",
           "group": "navigation"
         }
       ],
       "commandPalette": [
         {
           "command": "flink-sql-workbench.executeQuery",
-          "when": "resourceExtname == .sql && resourceFilename =~ /\\.flink\\.sql$/"
+          "when": "resourceLangId == flinksql"
+        },
+        {
+          "command": "flink-sql-workbench.executeAllQueries",
+          "when": "resourceLangId == flinksql"
+        },
+        {
+          "command": "flink-sql-workbench.executeSelectedNew",
+          "when": "resourceLangId == flinksql"
+        },
+        {
+          "command": "flink-sql-workbench.testNewConnection"
+        },
+        {
+          "command": "flink-sql-workbench.showSessionInfo"
+        },
+        {
+          "command": "flink-sql-workbench.refreshSessionNew"
+        },
+        {
+          "command": "flink-sql-workbench.cancelAllNew"
+        },
+        {
+          "command": "flink-sql-workbench.showNewOutput"
         }
       ],
       "view/title": [
@@ -234,6 +294,20 @@
         }
       ]
     },
+    "keybindings": [
+      {
+        "command": "flink-sql-workbench.executeQuery",
+        "key": "ctrl+enter",
+        "mac": "cmd+enter",
+        "when": "resourceLangId == flinksql"
+      },
+      {
+        "command": "flink-sql-workbench.executeAllQueries",
+        "key": "ctrl+shift+enter",
+        "mac": "cmd+shift+enter",
+        "when": "resourceLangId == flinksql"
+      }
+    ],
     "configuration": {
       "title": "Flink SQL Workbench",
       "properties": {
@@ -354,12 +428,12 @@
         },
         "flinkSqlWorkbench.catalog.autoRefresh": {
           "type": "boolean",
-          "default": true,
+          "default": false,
           "description": "Automatically refresh catalog when connecting"
         },
         "flinkSqlWorkbench.jobs.autoRefresh": {
           "type": "boolean",
-          "default": true,
+          "default": false,
           "description": "Automatically refresh jobs list"
         },
         "flinkSqlWorkbench.jobs.refreshInterval": {

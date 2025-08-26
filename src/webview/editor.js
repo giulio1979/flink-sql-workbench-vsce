@@ -225,6 +225,9 @@ function setupEventHandlers() {
                         editor.setValue(message.text);
                     }
                     break;
+                case 'executionProgress':
+                    updateExecutionProgress(message);
+                    break;
                 case 'queryExecuted':
                     setExecutionStatus(message.success, message.error);
                     break;
@@ -292,6 +295,27 @@ function setExecutionStatus(success, error) {
         setTimeout(() => updateStatus('Ready', ''), 3000);
     } else {
         updateStatus(`Query failed: ${error || 'Unknown error'}`, 'error');
+    }
+}
+
+function updateExecutionProgress(message) {
+    // Update status with live progress information
+    const { state, rowCount, columnCount, resultType, resultKind } = message;
+    
+    if (state === 'RUNNING') {
+        let statusText = `Executing... `;
+        if (rowCount > 0) {
+            statusText += `${rowCount} rows`;
+            if (columnCount > 0) {
+                statusText += `, ${columnCount} columns`;
+            }
+        }
+        if (resultType && resultType !== 'EOS') {
+            statusText += ` (${resultType})`;
+        }
+        updateStatus(statusText, 'executing');
+    } else if (state === 'STOPPED') {
+        updateStatus(`Completed: ${rowCount} rows, ${columnCount} columns`, 'success');
     }
 }
 

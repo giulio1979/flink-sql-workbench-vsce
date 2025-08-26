@@ -189,17 +189,41 @@ export class SettingsWebviewProvider implements vscode.WebviewViewProvider {
     }
 
     private async testConnection() {
-        const { FlinkGatewayService } = require('../services/FlinkGatewayService');
-        const testService = new FlinkGatewayService();
+        const { FlinkApiService, SessionManager } = require('../services');
         
         try {
-            const result = await testService.connect();
-            if (result) {
-                vscode.window.showInformationMessage(`Connection test successful! Session: ${result.sessionHandle}`);
-                await testService.disconnect();
-            } else {
-                vscode.window.showErrorMessage('Connection test failed. Check your settings and gateway status.');
+            // Initialize services for testing
+            const flinkApi = new FlinkApiService();
+            
+            // Load configuration
+            const gatewayConfig = vscode.workspace.getConfiguration('flinkSqlWorkbench.gateway');
+            let url = gatewayConfig.get<string>('url', '');
+            if (!url) {
+                const host = gatewayConfig.get<string>('host', 'localhost');
+                const port = gatewayConfig.get<number>('port', 8083);
+                url = `http://${host}:${port}`;
             }
+            
+            flinkApi.setBaseUrl(url);
+            
+            // Set credentials if provided
+            const username = gatewayConfig.get<string>('authentication.username');
+            const password = gatewayConfig.get<string>('authentication.password');
+            const apiToken = gatewayConfig.get<string>('authentication.apiToken');
+            
+            if (username || password || apiToken) {
+                flinkApi.setCredentials(username, password, apiToken);
+            }
+            
+            // Test connection by creating a session
+            const sessionManager = SessionManager.getInstance(flinkApi);
+            const sessionInfo = await sessionManager.createSession();
+            
+            vscode.window.showInformationMessage(`Connection test successful! Session: ${sessionInfo.sessionHandle}`);
+            
+            // Clean up test session
+            await sessionManager.closeSession();
+            
         } catch (error) {
             vscode.window.showErrorMessage(`Connection test failed: ${error}`);
         }
@@ -431,7 +455,7 @@ export class SettingsWebviewProvider implements vscode.WebviewViewProvider {
                 <h3>Jobs & Catalog</h3>
                 <div class="form-group">
                     <div class="checkbox-group">
-                        <input type="checkbox" id="catalog-auto-refresh" ${config.get('catalog.autoRefresh', true) ? 'checked' : ''}
+                        <input type="checkbox" id="catalog-auto-refresh" ${config.get('catalog.autoRefresh', false) ? 'checked' : ''}
                                onchange="updateSetting('flinkSqlWorkbench.catalog.autoRefresh', this.checked)">
                         <label for="catalog-auto-refresh">Auto Refresh Catalog</label>
                     </div>
@@ -439,7 +463,7 @@ export class SettingsWebviewProvider implements vscode.WebviewViewProvider {
 
                 <div class="form-group">
                     <div class="checkbox-group">
-                        <input type="checkbox" id="jobs-auto-refresh" ${config.get('jobs.autoRefresh', true) ? 'checked' : ''}
+                        <input type="checkbox" id="jobs-auto-refresh" ${config.get('jobs.autoRefresh', false) ? 'checked' : ''}
                                onchange="updateSetting('flinkSqlWorkbench.jobs.autoRefresh', this.checked)">
                         <label for="jobs-auto-refresh">Auto Refresh Jobs</label>
                     </div>

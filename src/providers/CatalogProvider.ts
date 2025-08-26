@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { FlinkGatewayService } from '../services/FlinkGatewayService';
+import { FlinkGatewayServiceAdapter } from '../services/FlinkGatewayServiceAdapter';
 
 export class CatalogProvider implements vscode.TreeDataProvider<CatalogItem> {
     private _onDidChangeTreeData: vscode.EventEmitter<CatalogItem | undefined | null | void> = new vscode.EventEmitter<CatalogItem | undefined | null | void>();
@@ -11,9 +11,11 @@ export class CatalogProvider implements vscode.TreeDataProvider<CatalogItem> {
     private loadingCatalogs = new Set<string>();
 
     constructor(
-        private readonly gatewayService: FlinkGatewayService,
+        private readonly gatewayService: FlinkGatewayServiceAdapter,
         private readonly context: vscode.ExtensionContext
     ) {
+        // Explicit type check to ensure TypeScript recognizes the service interface
+        this.gatewayService = gatewayService;
         this.refresh();
     }
 

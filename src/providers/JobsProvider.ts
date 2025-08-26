@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { FlinkGatewayService } from '../services/FlinkGatewayService';
+import { FlinkGatewayServiceAdapter } from '../services/FlinkGatewayServiceAdapter';
 
 export interface FlinkJob {
     id: string;
@@ -16,14 +16,20 @@ export class JobsProvider implements vscode.TreeDataProvider<JobItem | JobGroupI
 
     private jobs: FlinkJob[] = [];
     private refreshInterval: NodeJS.Timeout | null = null;
-    private autoRefresh: boolean = true;
+    private autoRefresh: boolean = false;
 
     constructor(
-        private readonly gatewayService: FlinkGatewayService,
+        private readonly gatewayService: FlinkGatewayServiceAdapter,
         private readonly context: vscode.ExtensionContext
     ) {
+        // Read auto-refresh setting from configuration
+        const config = vscode.workspace.getConfiguration('flinkSqlWorkbench.jobs');
+        this.autoRefresh = config.get('autoRefresh', false);
+        
         this.refresh();
-        this.startAutoRefresh();
+        if (this.autoRefresh) {
+            this.startAutoRefresh();
+        }
     }
 
     refresh(): void {

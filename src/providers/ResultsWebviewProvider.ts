@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { QueryResult } from '../services/FlinkGatewayService';
+import { QueryResult } from '../types';
 
 export class ResultsWebviewProvider {
     private panel: vscode.WebviewPanel | undefined;
@@ -34,6 +34,21 @@ export class ResultsWebviewProvider {
 
     public updateResults(results: QueryResult): void {
         this.currentResult = results;
+        
+        // Debug logging
+        this.outputChannel.appendLine(`=== DEBUG: updateResults called ===`);
+        this.outputChannel.appendLine(`Columns: ${results.columns.length}`);
+        this.outputChannel.appendLine(`Results: ${results.results.length}`);
+        this.outputChannel.appendLine(`Error: ${results.error || 'none'}`);
+        
+        if (results.columns.length > 0) {
+            this.outputChannel.appendLine(`Column names: ${results.columns.map(c => typeof c === 'string' ? c : c.name).join(', ')}`);
+        }
+        
+        if (results.results.length > 0 && results.results.length <= 3) {
+            this.outputChannel.appendLine(`Sample rows: ${JSON.stringify(results.results, null, 2)}`);
+        }
+        
         if (this.panel) {
             this.panel.webview.html = this.getResultsHtml(results);
         } else {
@@ -68,7 +83,27 @@ export class ResultsWebviewProvider {
         this.outputChannel.appendLine(`Columns: ${JSON.stringify(result.columns, null, 2)}`);
         this.outputChannel.appendLine(`First few results: ${JSON.stringify(result.results?.slice(0, 3), null, 2)}`);
         this.outputChannel.appendLine(`Results length: ${result.results?.length}`);
+        this.outputChannel.appendLine(`Error: ${result.error || 'none'}`);
         this.outputChannel.show(); // Show the output panel for debugging
+        
+        // Handle error case
+        if (result.error) {
+            return `<!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <title>Query Error</title>
+                <style>
+                    .error { color: red; background: #ffe6e6; padding: 10px; border: 1px solid red; margin: 10px 0; }
+                </style>
+            </head>
+            <body>
+                <h2>Query Execution Error</h2>
+                <div class="error">${result.error}</div>
+                <p>Execution time: ${result.executionTime}ms</p>
+            </body>
+            </html>`;
+        }
         
         if (!result.columns || !result.results) {
             return this.getWelcomeHtml();

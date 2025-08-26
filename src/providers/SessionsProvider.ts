@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
-import { FlinkGatewayService, SessionInfo } from '../services/FlinkGatewayService';
+import { FlinkGatewayServiceAdapter } from '../services/FlinkGatewayServiceAdapter';
+import { SessionInfo } from '../types';
 
 export class SessionsProvider implements vscode.TreeDataProvider<SessionItem> {
     private _onDidChangeTreeData: vscode.EventEmitter<SessionItem | undefined | null | void> = new vscode.EventEmitter<SessionItem | undefined | null | void>();
@@ -8,7 +9,7 @@ export class SessionsProvider implements vscode.TreeDataProvider<SessionItem> {
     private currentSession: SessionInfo | null = null;
 
     constructor(
-        private readonly gatewayService: FlinkGatewayService,
+        private readonly gatewayService: FlinkGatewayServiceAdapter,
         private readonly context: vscode.ExtensionContext
     ) {
         this.refresh();

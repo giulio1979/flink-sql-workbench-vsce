@@ -1,13 +1,20 @@
 import * as vscode from 'vscode';
-import { FlinkGatewayService } from '../services/FlinkGatewayService';
+import { StatementManager } from '../services/StatementManager';
+import { StatementExecutionEngine } from '../services/StatementExecutionEngine';
 import { ResultsWebviewProvider } from './ResultsWebviewProvider';
+import { QueryResult } from '../types';
+import { logger } from '../services/logger';
 
 export class FlinkSqlEditorProvider implements vscode.CustomTextEditorProvider {
+    private executionEngines: Map<string, StatementExecutionEngine> = new Map();
+
     constructor(
         private readonly context: vscode.ExtensionContext,
-        private readonly gatewayService: FlinkGatewayService,
+        private readonly statementManager: StatementManager,
         private readonly resultsProvider: ResultsWebviewProvider
-    ) {}
+    ) {
+        // No initialization needed for new services
+    }
 
     public async resolveCustomTextEditor(
         document: vscode.TextDocument,
@@ -46,23 +53,7 @@ export class FlinkSqlEditorProvider implements vscode.CustomTextEditorProvider {
         webviewPanel.webview.onDidReceiveMessage(async (message) => {
             switch (message.type) {
                 case 'executeQuery':
-                    const result = await this.gatewayService.executeQuery(message.query);
-                    if (result) {
-                        this.resultsProvider.show();
-                        this.resultsProvider.updateResults(result);
-                        webviewPanel.webview.postMessage({
-                            type: 'queryExecuted',
-                            success: true
-                        });
-                    } else {
-                        // Error is already logged to output channel in the service
-                        this.gatewayService.showOutput();
-                        webviewPanel.webview.postMessage({
-                            type: 'queryExecuted',
-                            success: false,
-                            error: 'Query execution failed. Check the output panel for details.'
-                        });
-                    }
+                    await this.executeQueryWithDeltaStream(message.query, webviewPanel);
                     break;
                 case 'updateDocument':
                     this.updateTextDocument(document, message.text);
@@ -72,6 +63,125 @@ export class FlinkSqlEditorProvider implements vscode.CustomTextEditorProvider {
 
         // Initialize webview content
         updateWebview();
+    }
+
+    private async executeQueryWithDeltaStream(query: string, webviewPanel: vscode.WebviewPanel): Promise<void> {
+        try {
+            // Use StatementManager directly which handles the execution engine internally
+            const executionId = `exec_${Date.now()}`;
+
+            // Execute the query using StatementManager
+            const result = await this.statementManager.executeSQL(query, executionId);
+
+            // Convert ExecutionResult to QueryResult format for the results provider
+            const queryResult: QueryResult = {
+                columns: result.state.columns.map(col => ({
+                    name: col.name,
+                    logicalType: {
+                        type: col.logicalType.type,
+                        nullable: col.logicalType.nullable
+                    }
+                })),
+                results: result.state.results,
+                executionTime: result.state.lastUpdateTime || 0,
+                affectedRows: result.state.results.length,
+                error: result.error
+            };
+
+            // Update results panel
+            this.resultsProvider.show();
+            this.resultsProvider.updateResults(queryResult);
+
+            // Notify webview of final completion
+            webviewPanel.webview.postMessage({
+                type: 'queryExecuted',
+                success: result.status === 'COMPLETED',
+                message: result.message,
+                error: result.error,
+                finalRowCount: result.state.results.length
+            });
+
+            if (result.status === 'COMPLETED') {
+                vscode.window.showInformationMessage(
+                    `Query completed: ${result.state.results.length} rows (after changelog processing)`
+                );
+            } else if (result.status === 'ERROR') {
+                vscode.window.showErrorMessage(`Query failed: ${result.error || result.message}`);
+                logger.show();
+            } else if (result.status === 'CANCELLED') {
+                vscode.window.showWarningMessage('Query execution was cancelled');
+            }
+
+        } catch (error) {
+            webviewPanel.webview.postMessage({
+                type: 'queryExecuted',
+                success: false,
+                error: error instanceof Error ? error.message : 'Unknown error'
+            });
+            
+            vscode.window.showErrorMessage(`Query execution failed: ${error}`);
+            logger.show();
+        }
+    }
+
+    // Keep the simple method as fallback for non-streaming queries
+    private async executeQuery(query: string, webviewPanel: vscode.WebviewPanel): Promise<void> {
+        try {
+            // Execute the query using StatementManager
+            const result = await this.statementManager.executeSQL(query);
+            
+            if (result.status === 'COMPLETED') {
+                // Convert ExecutionResult to QueryResult format
+                const queryResult: QueryResult = {
+                    columns: result.state.columns.map(col => ({
+                        name: col.name,
+                        logicalType: {
+                            type: col.logicalType.type,
+                            nullable: col.logicalType.nullable
+                        }
+                    })),
+                    results: result.state.results,
+                    executionTime: result.state.lastUpdateTime || 0,
+                    affectedRows: result.state.results.length,
+                    error: result.error
+                };
+
+                // Show results panel
+                this.resultsProvider.show();
+                this.resultsProvider.updateResults(queryResult);
+                
+                // Notify webview of success
+                webviewPanel.webview.postMessage({
+                    type: 'queryExecuted',
+                    success: true,
+                    message: `Query completed: ${result.state.results.length} rows retrieved`
+                });
+                
+                vscode.window.showInformationMessage(`Query completed: ${result.state.results.length} rows retrieved`);
+            } else {
+                // Query failed
+                webviewPanel.webview.postMessage({
+                    type: 'queryExecuted',
+                    success: false,
+                    error: result.error || 'Query execution failed'
+                });
+                
+                vscode.window.showErrorMessage(`Query execution failed: ${result.error || result.message}`);
+                logger.show();
+            }
+        } catch (error) {
+            // Handle execution errors
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            
+            webviewPanel.webview.postMessage({
+                type: 'queryExecuted',
+                success: false,
+                error: errorMessage
+            });
+            
+            vscode.window.showErrorMessage(`Query execution failed: ${errorMessage}`);
+            logger.show();
+        }
     }
 
     private updateTextDocument(document: vscode.TextDocument, text: string) {
