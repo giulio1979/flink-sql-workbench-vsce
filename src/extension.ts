@@ -33,6 +33,14 @@ let jobsProvider: JobsProvider;
 let catalogProvider: CatalogProvider;
 let settingsProvider: SettingsWebviewProvider;
 
+// Track user-initiated SQL executions
+const userInitiatedStatements = new Set<string>();
+
+// Helper function to mark a statement as user-initiated
+const markUserInitiated = (statementId: string) => {
+    userInitiatedStatements.add(statementId);
+};
+
 // Converter function from ExecutionResult to QueryResult
 function convertExecutionResultToQueryResult(executionResult: ExecutionResult): QueryResult {
     return {
@@ -215,6 +223,9 @@ function registerCommands(context: vscode.ExtensionContext): void {
                         const result = await statementManager.executeSQL(sqlToExecute);
                         currentStatementId = result.statementId;
                         
+                        // Mark this as a user-initiated statement
+                        markUserInitiated(result.statementId);
+                        
                         if (result.status === 'COMPLETED') {
                             const rowCount = result.state.results.length;
                             const columnCount = result.state.columns.length;
@@ -286,6 +297,9 @@ function registerCommands(context: vscode.ExtensionContext): void {
                         logger.info(`Executing statement ${index + 1}/${statements.length}: ${statement.substring(0, 50)}...`);
                         
                         const result = await statementManager.executeSQL(statement);
+                        
+                        // Mark this as a user-initiated statement
+                        markUserInitiated(result.statementId);
                         
                         if (result.status === 'COMPLETED') {
                             successCount++;
@@ -517,6 +531,9 @@ function registerCommands(context: vscode.ExtensionContext): void {
                     return await statementManager.executeSQL(sqlToExecute);
                 });
 
+                // Mark this as a user-initiated statement
+                markUserInitiated(result.statementId);
+
                 // Convert and show results
                 resultsProvider.updateResults(convertExecutionResultToQueryResult(result));
                 resultsProvider.show();
@@ -638,22 +655,38 @@ function setupEventListeners(): void {
                     logger.info(`Statement started: ${event.statementId}`);
                 } else if (event.eventType === 'statement_completed') {
                     logger.info(`Statement completed: ${event.statementId}`);
+                    // Clean up tracking for completed statements
+                    if (event.statementId) {
+                        userInitiatedStatements.delete(event.statementId);
+                    }
                 } else if (event.eventType === 'statement_error') {
                     logger.error(`Statement error: ${event.statementId} - ${event.error}`);
+                    // Clean up tracking for failed statements
+                    if (event.statementId) {
+                        userInitiatedStatements.delete(event.statementId);
+                    }
                 }
                 break;
                 
             case 'statement_update':
-                // Update results view with latest data
+                // Only update results view for user-initiated SQL executions
+                // Do NOT update for system queries (jobs/catalog refresh, etc.)
                 if (event.state?.results && event.state?.columns && event.statementId) {
-                    // Create a temporary ExecutionResult to convert
-                    const tempResult: ExecutionResult = {
-                        status: 'COMPLETED',
-                        message: 'Update received',
-                        state: event.state,
-                        statementId: event.statementId
-                    };
-                    resultsProvider.updateResults(convertExecutionResultToQueryResult(tempResult));
+                    const isUserInitiated = userInitiatedStatements.has(event.statementId);
+                    
+                    if (isUserInitiated) {
+                        logger.info(`Updating results panel for user-initiated statement ${event.statementId} - ${event.state.results.length} rows`);
+                        
+                        const tempResult: ExecutionResult = {
+                            status: 'COMPLETED',
+                            message: 'Update received',
+                            state: event.state,
+                            statementId: event.statementId
+                        };
+                        resultsProvider.updateResults(convertExecutionResultToQueryResult(tempResult));
+                    } else {
+                        logger.info(`Ignoring statement update for system query ${event.statementId} (jobs/catalog refresh)`);
+                    }
                 }
                 break;
         }
