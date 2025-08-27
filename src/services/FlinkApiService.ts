@@ -44,13 +44,16 @@ export class FlinkApiService {
         
         this.baseUrl = url.endsWith('/') ? url.slice(0, -1) : url;
         
-        // Use proxy for:
-        // 1. URLs that start with /api/flink (explicit proxy)
-        // 2. External URLs (not localhost) to avoid CORS issues
-        this.useProxy = url.startsWith('/api/flink') || 
-                       (!url.includes('localhost') && (url.startsWith('http://') || url.startsWith('https://')));
+        // Check if user has explicitly enabled proxy mode
+        const gatewayConfig = vscode.workspace.getConfiguration('flinkSqlWorkbench.gateway');
+        const forceProxy = gatewayConfig.get<boolean>('useProxy', false);
         
-        log.info('setBaseUrl', `Base URL: ${this.baseUrl} (proxy: ${this.useProxy})`);
+        // Use proxy mode if:
+        // 1. User explicitly enabled it via configuration, OR
+        // 2. URL starts with /api/flink (explicit proxy path)
+        this.useProxy = forceProxy || url.startsWith('/api/flink');
+        
+        log.info('setBaseUrl', `Base URL: ${this.baseUrl} (proxy: ${this.useProxy}${forceProxy ? ' - forced by config' : ''})`);
         log.traceExit('setBaseUrl');
     }
 
@@ -66,6 +69,9 @@ export class FlinkApiService {
             if (this.baseUrl.startsWith('/api/flink')) {
                 return `${this.baseUrl}${endpoint}`;
             }
+            // For full URLs (http://localhost:8083, http://somehost:8083, etc.)
+            // we need to construct a proxy path that includes the host info
+            // The proxy should handle routing to the actual Flink Gateway
             return `/api/flink${endpoint}`;
         }
         return `${this.baseUrl}${endpoint}`;
