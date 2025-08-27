@@ -1,8 +1,9 @@
 {
   "name": "flink-sql-workbench",
   "displayName": "Flink SQL Workbench",
-  "description": "VS Code extension for editing and executing Flink SQL with gateway session management",
+  "description": "VS Code extension for editing and executing Flink SQL with gateway session management (Avichay Marciano, Iulius Hutuleac)",
   "version": "0.0.1",
+  "license": "MIT",
   "engines": {
     "vscode": "^1.103.0"
   },
@@ -11,6 +12,7 @@
     "Other"
   ],
   "main": "./dist/extension.js",
+  "publisher": "IuliusHutuleac",
   "contributes": {
     "languages": [
       {
