@@ -43,3 +43,4 @@ This VS Code extension for Flink SQL Workbench is ready for development and test
 4. Execute queries and view results
 
 The extension is compiled and ready for testing!
+

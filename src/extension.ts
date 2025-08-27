@@ -291,33 +291,73 @@ function registerCommands(context: vscode.ExtensionContext): void {
                 
                 let successCount = 0;
                 let failCount = 0;
+                let allResults: any[] = [];
 
-                for (const [index, statement] of Array.from(statements.entries())) {
-                    try {
-                        logger.info(`Executing statement ${index + 1}/${statements.length}: ${statement.substring(0, 50)}...`);
-                        
-                        const result = await statementManager.executeSQL(statement);
-                        
-                        // Mark this as a user-initiated statement
-                        markUserInitiated(result.statementId);
-                        
-                        if (result.status === 'COMPLETED') {
-                            successCount++;
-                            logger.info(`Statement ${index + 1} completed: ${result.state.results.length} rows`);
-                        } else {
+                // Show progress for multiple statements
+                await vscode.window.withProgress({
+                    location: vscode.ProgressLocation.Notification,
+                    title: "Executing Multiple SQL Statements",
+                    cancellable: false
+                }, async (progress) => {
+                    
+                    for (const [index, statement] of Array.from(statements.entries())) {
+                        try {
+                            progress.report({ 
+                                message: `Executing statement ${index + 1}/${statements.length}...`,
+                                increment: (100 / statements.length) 
+                            });
+                            
+                            logger.info(`Executing statement ${index + 1}/${statements.length}: ${statement.substring(0, 50)}...`);
+                            
+                            const result = await statementManager.executeSQL(statement);
+                            
+                            // Mark this as a user-initiated statement
+                            markUserInitiated(result.statementId);
+                            
+                            if (result.status === 'COMPLETED') {
+                                successCount++;
+                                allResults.push({
+                                    statement: statement,
+                                    index: index + 1,
+                                    result: result
+                                });
+                                logger.info(`Statement ${index + 1} completed: ${result.state.results.length} rows`);
+                                
+                            } else {
+                                failCount++;
+                                logger.error(`Statement ${index + 1} failed: ${result.message}`);
+                            }
+                            
+                        } catch (error: any) {
                             failCount++;
-                            logger.error(`Statement ${index + 1} failed: ${result.message}`);
+                            logger.error(`Statement ${index + 1} error: ${error.message}`);
                         }
-                        
-                    } catch (error: any) {
-                        failCount++;
-                        logger.error(`Statement ${index + 1} error: ${error.message}`);
                     }
+                });
+
+                // Show results panel with combined results if we have any successful results
+                if (allResults.length > 0) {
+                    // For multiple queries, show the last successful result in the results panel
+                    const lastResult = allResults[allResults.length - 1].result;
+                    resultsProvider.updateResults(convertExecutionResultToQueryResult(lastResult));
+                    
+                    // Ensure the results panel is visible
+                    vscode.commands.executeCommand('flink-sql-workbench.showResults');
+                    
+                    // Also log all results for reference
+                    logger.info('=== MULTIPLE QUERY EXECUTION SUMMARY ===');
+                    allResults.forEach(({ statement, index, result }) => {
+                        logger.info(`--- Query ${index}: ${statement.substring(0, 100)}... ---`);
+                        logger.info(`Status: ${result.status}`);
+                        logger.info(`Rows: ${result.state.results.length}`);
+                        logger.info(`Columns: ${result.state.columns.length}`);
+                    });
+                    logger.info('=== END SUMMARY ===');
                 }
 
                 // Show summary
                 if (failCount === 0) {
-                    vscode.window.showInformationMessage(`All ${successCount} queries executed successfully`);
+                    vscode.window.showInformationMessage(`All ${successCount} queries executed successfully. Check Results panel for latest output.`);
                 } else if (successCount > 0) {
                     vscode.window.showWarningMessage(`${successCount} queries succeeded, ${failCount} failed. Check output for details.`);
                     logger.show();
@@ -495,61 +535,6 @@ function registerCommands(context: vscode.ExtensionContext): void {
         })
     );
 
-    // Execute Selected SQL (New Services) command
-    context.subscriptions.push(
-        vscode.commands.registerCommand('flink-sql-workbench.executeSelectedNew', async () => {
-            const activeEditor = vscode.window.activeTextEditor;
-            if (!activeEditor) {
-                vscode.window.showWarningMessage('No active editor found');
-                return;
-            }
-
-            const selection = activeEditor.selection;
-            let sqlToExecute: string;
-
-            if (selection.isEmpty) {
-                // No selection, execute entire document
-                sqlToExecute = activeEditor.document.getText();
-            } else {
-                // Execute selected text
-                sqlToExecute = activeEditor.document.getText(selection);
-            }
-
-            if (!sqlToExecute.trim()) {
-                vscode.window.showWarningMessage('No SQL to execute');
-                return;
-            }
-
-            try {
-                logger.info(`🚀 Executing SQL with New Services: ${sqlToExecute.substring(0, 100)}...`);
-                
-                const result = await vscode.window.withProgress({
-                    location: vscode.ProgressLocation.Notification,
-                    title: "🚀 Executing SQL (New Services)",
-                    cancellable: true
-                }, async (progress, token) => {
-                    return await statementManager.executeSQL(sqlToExecute);
-                });
-
-                // Mark this as a user-initiated statement
-                markUserInitiated(result.statementId);
-
-                // Convert and show results
-                resultsProvider.updateResults(convertExecutionResultToQueryResult(result));
-                resultsProvider.show();
-
-                const rowCount = result.state.results.length;
-                vscode.window.showInformationMessage(
-                    `✅ Query executed successfully! ${rowCount} rows returned`
-                );
-
-            } catch (error: any) {
-                logger.error(`Query execution failed: ${error.message}`);
-                vscode.window.showErrorMessage(`❌ Query execution failed: ${error.message}`);
-            }
-        })
-    );
-
     // Show Session Info (New) command
     context.subscriptions.push(
         vscode.commands.registerCommand('flink-sql-workbench.showSessionInfo', async () => {
@@ -601,13 +586,147 @@ function registerCommands(context: vscode.ExtensionContext): void {
 
     context.subscriptions.push(
         vscode.commands.registerCommand('flink-sql-workbench.stopJob', async (jobItem) => {
-            vscode.window.showInformationMessage('Stop Job functionality will be implemented');
+            if (!jobItem || !jobItem.job) {
+                vscode.window.showWarningMessage('No job selected');
+                return;
+            }
+
+            const job = jobItem.job;
+            
+            // Confirm the action
+            const confirm = await vscode.window.showWarningMessage(
+                `Are you sure you want to stop job "${job.name}" (${job.id})?`,
+                { modal: true },
+                'Stop Job',
+                'Cancel'
+            );
+
+            if (confirm !== 'Stop Job') {
+                return;
+            }
+
+            try {
+                // Use Flink SQL STOP JOB statement
+                const stopStatement = `STOP JOB '${job.id}';`;
+                logger.info(`Stopping job: ${stopStatement}`);
+                
+                const result = await statementManager.executeSQL(stopStatement);
+                
+                if (result.status === 'COMPLETED') {
+                    vscode.window.showInformationMessage(`Job "${job.name}" stopped successfully`);
+                    // Refresh the jobs view
+                    jobsProvider.refresh();
+                } else {
+                    vscode.window.showErrorMessage(`Failed to stop job: ${result.message || 'Unknown error'}`);
+                }
+                
+            } catch (error: any) {
+                logger.error(`Error stopping job ${job.id}: ${error.message}`);
+                vscode.window.showErrorMessage(`Error stopping job: ${error.message}`);
+            }
         })
     );
 
     context.subscriptions.push(
         vscode.commands.registerCommand('flink-sql-workbench.cancelJob', async (jobItem) => {
-            vscode.window.showInformationMessage('Cancel Job functionality will be implemented');
+            if (!jobItem || !jobItem.job) {
+                vscode.window.showWarningMessage('No job selected');
+                return;
+            }
+
+            const job = jobItem.job;
+            
+            // Confirm the action
+            const confirm = await vscode.window.showWarningMessage(
+                `Are you sure you want to cancel job "${job.name}" (${job.id})?\n\nThis will immediately terminate the job without graceful shutdown.`,
+                { modal: true },
+                'Cancel Job',
+                'Cancel Action'
+            );
+
+            if (confirm !== 'Cancel Job') {
+                return;
+            }
+
+            try {
+                // Use Flink SQL CANCEL JOB statement
+                const cancelStatement = `CANCEL JOB '${job.id}';`;
+                logger.info(`Cancelling job: ${cancelStatement}`);
+                
+                const result = await statementManager.executeSQL(cancelStatement);
+                
+                if (result.status === 'COMPLETED') {
+                    vscode.window.showInformationMessage(`Job "${job.name}" cancelled successfully`);
+                    // Refresh the jobs view
+                    jobsProvider.refresh();
+                } else {
+                    vscode.window.showErrorMessage(`Failed to cancel job: ${result.message || 'Unknown error'}`);
+                }
+                
+            } catch (error: any) {
+                logger.error(`Error cancelling job ${job.id}: ${error.message}`);
+                vscode.window.showErrorMessage(`Error cancelling job: ${error.message}`);
+            }
+        })
+    );
+
+    // View job details command
+    context.subscriptions.push(
+        vscode.commands.registerCommand('flink-sql-workbench.viewJobDetails', async (jobItem) => {
+            if (!jobItem || !jobItem.job) {
+                vscode.window.showWarningMessage('No job selected');
+                return;
+            }
+
+            const job = jobItem.job;
+            
+            try {
+                // Show job details in a new panel
+                const panel = vscode.window.createWebviewPanel(
+                    'jobDetails',
+                    `Job Details: ${job.name}`,
+                    vscode.ViewColumn.Two,
+                    {}
+                );
+
+                panel.webview.html = `
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <title>Job Details</title>
+                    <style>
+                        body { font-family: var(--vscode-font-family); padding: 20px; }
+                        .job-info { margin-bottom: 20px; }
+                        .label { font-weight: bold; }
+                        .value { margin-left: 10px; }
+                        .status-${job.status.toLowerCase()} { 
+                            color: ${job.status === 'RUNNING' ? 'green' : 
+                                    job.status === 'FAILED' ? 'red' : 
+                                    job.status === 'FINISHED' ? 'blue' : 'orange'}; 
+                        }
+                    </style>
+                </head>
+                <body>
+                    <h2>Job Details</h2>
+                    <div class="job-info">
+                        <div><span class="label">Job ID:</span><span class="value">${job.id}</span></div>
+                        <div><span class="label">Name:</span><span class="value">${job.name}</span></div>
+                        <div><span class="label">Status:</span><span class="value status-${job.status.toLowerCase()}">${job.status}</span></div>
+                        <div><span class="label">Start Time:</span><span class="value">${job.startTime}</span></div>
+                        ${job.endTime ? `<div><span class="label">End Time:</span><span class="value">${job.endTime}</span></div>` : ''}
+                        ${job.duration ? `<div><span class="label">Duration:</span><span class="value">${job.duration}</span></div>` : ''}
+                    </div>
+                    
+                    <h3>Actions</h3>
+                    <p>Use the context menu in the Jobs panel to stop or cancel this job.</p>
+                </body>
+                </html>`;
+                
+            } catch (error: any) {
+                logger.error(`Error viewing job details: ${error.message}`);
+                vscode.window.showErrorMessage(`Error viewing job details: ${error.message}`);
+            }
         })
     );
 

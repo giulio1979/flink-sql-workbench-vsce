@@ -105,12 +105,18 @@
       },
       {
         "command": "flink-sql-workbench.stopJob",
-        "title": "Stop Job"
+        "title": "Stop Job",
+        "icon": "$(debug-stop)"
       },
       {
         "command": "flink-sql-workbench.cancelJob",
         "title": "Cancel Job",
         "icon": "$(stop)"
+      },
+      {
+        "command": "flink-sql-workbench.viewJobDetails",
+        "title": "View Job Details",
+        "icon": "$(info)"
       },
       {
         "command": "flink-sql-workbench.openSettings",
@@ -121,31 +127,6 @@
         "command": "flink-sql-workbench.testNewConnection",
         "title": "🔧 Test New Services Connection",
         "icon": "$(plug)"
-      },
-      {
-        "command": "flink-sql-workbench.executeSelectedNew",
-        "title": "🚀 Execute SQL (New Services)",
-        "icon": "$(rocket)"
-      },
-      {
-        "command": "flink-sql-workbench.showSessionInfo",
-        "title": "📊 Show Session Info (New)",
-        "icon": "$(info)"
-      },
-      {
-        "command": "flink-sql-workbench.refreshSessionNew",
-        "title": "🔄 Refresh Session (New)",
-        "icon": "$(refresh)"
-      },
-      {
-        "command": "flink-sql-workbench.cancelAllNew",
-        "title": "🛑 Cancel All Statements (New)",
-        "icon": "$(stop-circle)"
-      },
-      {
-        "command": "flink-sql-workbench.showNewOutput",
-        "title": "📋 Show New Services Output",
-        "icon": "$(output)"
       }
     ],
     "views": {
@@ -202,11 +183,6 @@
           "command": "flink-sql-workbench.executeAllQueries",
           "when": "resourceLangId == flinksql",
           "group": "navigation"
-        },
-        {
-          "command": "flink-sql-workbench.executeSelectedNew",
-          "when": "resourceLangId == flinksql",
-          "group": "navigation"
         }
       ],
       "commandPalette": [
@@ -219,23 +195,7 @@
           "when": "resourceLangId == flinksql"
         },
         {
-          "command": "flink-sql-workbench.executeSelectedNew",
-          "when": "resourceLangId == flinksql"
-        },
-        {
           "command": "flink-sql-workbench.testNewConnection"
-        },
-        {
-          "command": "flink-sql-workbench.showSessionInfo"
-        },
-        {
-          "command": "flink-sql-workbench.refreshSessionNew"
-        },
-        {
-          "command": "flink-sql-workbench.cancelAllNew"
-        },
-        {
-          "command": "flink-sql-workbench.showNewOutput"
         }
       ],
       "view/title": [
@@ -291,6 +251,10 @@
         {
           "command": "flink-sql-workbench.cancelJob",
           "when": "view == flinkSqlJobs && viewItem == runningJob"
+        },
+        {
+          "command": "flink-sql-workbench.viewJobDetails",
+          "when": "view == flinkSqlJobs && viewItem != jobGroup"
         }
       ]
     },
