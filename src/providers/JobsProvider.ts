@@ -203,21 +203,6 @@ export class JobsProvider implements vscode.TreeDataProvider<JobItem | JobGroupI
         }
     }
 
-    async cancelJob(jobId: string): Promise<void> {
-        try {
-            const result = await this.gatewayService.executeQuery(`CANCEL JOB '${jobId}';`);
-            if (result) {
-                vscode.window.showInformationMessage(`Job ${jobId} cancel command sent`);
-                // Refresh after a short delay to see the status change
-                setTimeout(() => this.refresh(), 2000);
-            } else {
-                vscode.window.showErrorMessage(`Failed to cancel job ${jobId}`);
-            }
-        } catch (error) {
-            vscode.window.showErrorMessage(`Error cancelling job ${jobId}: ${error}`);
-        }
-    }
-
     private startAutoRefresh(): void {
         if (this.autoRefresh && !this.refreshInterval) {
             console.log('[JobsProvider] Starting auto-refresh (10 second interval)');

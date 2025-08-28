@@ -22,8 +22,13 @@
     "languages": [
       {
         "id": "flinksql",
-        "aliases": ["Flink SQL", "flinksql"],
-        "extensions": [".flink.sql"],
+        "aliases": [
+          "Flink SQL",
+          "flinksql"
+        ],
+        "extensions": [
+          ".flink.sql"
+        ],
         "configuration": "./language-configuration.json"
       }
     ],
@@ -114,11 +119,6 @@
         "command": "flink-sql-workbench.stopJob",
         "title": "Stop Job",
         "icon": "$(debug-stop)"
-      },
-      {
-        "command": "flink-sql-workbench.cancelJob",
-        "title": "Cancel Job",
-        "icon": "$(stop)"
       },
       {
         "command": "flink-sql-workbench.viewJobDetails",
@@ -256,10 +256,6 @@
           "when": "view == flinkSqlJobs && viewItem == runningJob"
         },
         {
-          "command": "flink-sql-workbench.cancelJob",
-          "when": "view == flinkSqlJobs && viewItem == runningJob"
-        },
-        {
           "command": "flink-sql-workbench.viewJobDetails",
           "when": "view == flinkSqlJobs && viewItem != jobGroup"
         }
@@ -294,7 +290,11 @@
         },
         "flinkSqlWorkbench.gateway.apiVersion": {
           "type": "string",
-          "enum": ["v1", "v2", "auto"],
+          "enum": [
+            "v1",
+            "v2",
+            "auto"
+          ],
           "default": "auto",
           "description": "Flink Gateway API version to use (auto-detect by default)"
         },
@@ -382,7 +382,13 @@
         },
         "flinkSqlWorkbench.logging.level": {
           "type": "string",
-          "enum": ["trace", "debug", "info", "warn", "error"],
+          "enum": [
+            "trace",
+            "debug",
+            "info",
+            "warn",
+            "error"
+          ],
           "default": "info",
           "description": "Logging level for the extension"
         },
@@ -393,7 +399,11 @@
         },
         "flinkSqlWorkbench.ui.theme": {
           "type": "string",
-          "enum": ["auto", "dark", "light"],
+          "enum": [
+            "auto",
+            "dark",
+            "light"
+          ],
           "default": "auto",
           "description": "Theme for Flink SQL Workbench panels (follows VS Code theme by default)"
         },

@@ -627,49 +627,6 @@ function registerCommands(context: vscode.ExtensionContext): void {
         })
     );
 
-    context.subscriptions.push(
-        vscode.commands.registerCommand('flink-sql-workbench.cancelJob', async (jobItem) => {
-            if (!jobItem || !jobItem.job) {
-                vscode.window.showWarningMessage('No job selected');
-                return;
-            }
-
-            const job = jobItem.job;
-            
-            // Confirm the action
-            const confirm = await vscode.window.showWarningMessage(
-                `Are you sure you want to cancel job "${job.name}" (${job.id})?\n\nThis will immediately terminate the job without graceful shutdown.`,
-                { modal: true },
-                'Cancel Job',
-                'Cancel Action'
-            );
-
-            if (confirm !== 'Cancel Job') {
-                return;
-            }
-
-            try {
-                // Use Flink SQL CANCEL JOB statement
-                const cancelStatement = `CANCEL JOB '${job.id}';`;
-                logger.info(`Cancelling job: ${cancelStatement}`);
-                
-                const result = await statementManager.executeSQL(cancelStatement);
-                
-                if (result.status === 'COMPLETED') {
-                    vscode.window.showInformationMessage(`Job "${job.name}" cancelled successfully`);
-                    // Refresh the jobs view
-                    jobsProvider.refresh();
-                } else {
-                    vscode.window.showErrorMessage(`Failed to cancel job: ${result.message || 'Unknown error'}`);
-                }
-                
-            } catch (error: any) {
-                logger.error(`Error cancelling job ${job.id}: ${error.message}`);
-                vscode.window.showErrorMessage(`Error cancelling job: ${error.message}`);
-            }
-        })
-    );
-
     // View job details command
     context.subscriptions.push(
         vscode.commands.registerCommand('flink-sql-workbench.viewJobDetails', async (jobItem) => {
