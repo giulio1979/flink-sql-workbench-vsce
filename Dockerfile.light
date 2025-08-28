@@ -1,0 +1,26 @@
+FROM codercom/code-server:latest
+
+# Install a VS Code extension
+ENV PASSWORD="demo"
+RUN code-server --install-extension IuliusHutuleac.flink-sql-workbench && \
+    code-server --install-extension redhat.vscode-yaml && \
+    code-server --install-extension redhat.vscode-xml 
+USER 0
+RUN apt update && apt install -y jq
+USER 1000
+RUN mkdir -p /home/coder/projects
+RUN VERSION=$(curl -s 'https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery' \
+    -H 'accept: application/json;api-version=7.2-preview.1;excludeUrls=true' \
+    --json '{"filters":[{"criteria":[{"filterType":7,"value":"github.copilot"}]}],"flags":2151}' \
+    | jq -r '.results[0].extensions[0].versions[0].version') && \
+    curl \
+        -o "/home/coder/projects/copilot.vsix" \
+        --compressed \
+        "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/GitHub/vsextensions/copilot/${VERSION}/vspackage"
+RUN code-server --force -v --install-extension "/home/coder/projects/copilot.vsix"
+# Set default user (optional)
+
+WORKDIR /home/coder/projects
+
+USER 1000
+ENTRYPOINT [ "/usr/bin/entrypoint.sh", "--bind-addr", "0.0.0.0:8080", "/home/coder/projects"]
