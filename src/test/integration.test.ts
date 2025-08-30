@@ -4,6 +4,10 @@ import axios from 'axios';
 const FLINK_GATEWAY_URL = process.env.FLINK_GATEWAY_URL || 'http://localhost:8083';
 
 suite('Flink SQL Gateway Integration', () => {
+    if (!process.env.RUN_INTEGRATION) {
+        console.log('Skipping integration tests (set RUN_INTEGRATION=true to enable)');
+        return;
+    }
     let sessionHandle: string | undefined;
 
     test('Connect to Flink SQL Gateway', async () => {
@@ -28,7 +32,7 @@ suite('Flink SQL Gateway Integration', () => {
     if (!sessionHandle) { this.skip(); }
 
         const response = await axios.post(`${FLINK_GATEWAY_URL}/v1/sessions/${sessionHandle}/statements`, {
-            statement: 'SELECT 1 AS one'
+            statement: 'SELECT 1'
         });
     assert.ok([200, 201].includes(response.status), 'Statement should be accepted');
     console.log('Statement execution response:', response.data);
@@ -59,7 +63,7 @@ suite('Flink SQL Gateway Integration', () => {
             test('Execute a simple SQL statement', async function () {
                 if (!sessionHandle) { this.skip(); }
                 const response = await axios.post(`${FLINK_GATEWAY_URL}/v1/sessions/${sessionHandle}/statements`, {
-                    statement: 'SELECT 1 AS one'
+                    statement: 'SELECT 1'
                 });
                 assert.strictEqual(response.status, 201, 'Statement should be accepted');
                 assert.ok(response.data.handle, 'Statement handle should be returned');
@@ -68,7 +72,7 @@ suite('Flink SQL Gateway Integration', () => {
             test('Fetch statement results', async function () {
                 if (!sessionHandle) { this.skip(); }
                 const stmtResp = await axios.post(`${FLINK_GATEWAY_URL}/v1/sessions/${sessionHandle}/statements`, {
-                    statement: 'SELECT 1 AS one'
+                    statement: 'SELECT 1'
                 });
                 const statementHandle = stmtResp.data.handle;
                 let result;
@@ -89,7 +93,7 @@ suite('Flink SQL Gateway Integration', () => {
                 // Submit a long-running statement (simulate with SLEEP if supported)
                 // For demo, just submit and cancel
                 const stmtResp = await axios.post(`${FLINK_GATEWAY_URL}/v1/sessions/${sessionHandle}/statements`, {
-                    statement: 'SELECT 1 AS one'
+                    statement: 'SELECT 1'
                 });
                 const statementHandle = stmtResp.data.handle;
                 // Cancel statement

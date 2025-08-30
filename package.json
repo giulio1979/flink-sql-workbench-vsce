@@ -438,7 +438,9 @@
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
+    "@types/nock": "^10.0.3",
     "@types/node": "22.x",
+    "@types/sinon": "^17.0.4",
     "@types/vscode": "^1.103.0",
     "@typescript-eslint/eslint-plugin": "^8.39.0",
     "@typescript-eslint/parser": "^8.39.0",
@@ -446,6 +448,8 @@
     "@vscode/test-electron": "^2.5.2",
     "axios": "^1.11.0",
     "eslint": "^9.32.0",
+    "nock": "^14.0.10",
+    "sinon": "^21.0.0",
     "ts-loader": "^9.5.2",
     "typescript": "^5.9.2",
     "webpack": "^5.101.0",

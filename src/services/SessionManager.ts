@@ -192,8 +192,16 @@ export class SessionManager {
         }
 
         try {
-            log.info(`Closing session: ${this.currentSession.sessionHandle}`);
-            await this.flinkApi.closeSession(this.currentSession.sessionHandle);
+            const handle = this.currentSession.sessionHandle;
+            log.info(`Closing session: ${handle}`);
+
+            // Guard: only call real API close if handle looks like a UUID (avoid accidental placeholder handles)
+            const uuidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+            if (uuidRegex.test(handle)) {
+                await this.flinkApi.closeSession(handle);
+            } else {
+                log.info(`Skipping closeSession for non-UUID handle: ${handle}`);
+            }
             log.info('Session closed successfully');
         } catch (error: any) {
             log.warn(`Error closing session: ${error.message}`);
