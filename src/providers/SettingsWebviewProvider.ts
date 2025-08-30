@@ -1,9 +1,11 @@
 import * as vscode from 'vscode';
+import { DEFAULT_FLINK_GATEWAY_URL } from '../config';
 
 export class SettingsWebviewProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'flink-sql-workbench.settings';
 
     private _view?: vscode.WebviewView;
+    private disposables: vscode.Disposable[] = [];
 
     constructor(
         private readonly _extensionUri: vscode.Uri,
@@ -25,7 +27,7 @@ export class SettingsWebviewProvider implements vscode.WebviewViewProvider {
 
         webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
 
-        webviewView.webview.onDidReceiveMessage(data => {
+    const messageListener = webviewView.webview.onDidReceiveMessage(data => {
             switch (data.type) {
                 case 'updateSetting': {
                     this.updateSetting(data.key, data.value);
@@ -49,6 +51,7 @@ export class SettingsWebviewProvider implements vscode.WebviewViewProvider {
                 }
             }
         });
+    this.disposables.push(messageListener);
     }
 
     private updateSetting(key: string, value: any) {
@@ -235,6 +238,20 @@ export class SettingsWebviewProvider implements vscode.WebviewViewProvider {
         }
     }
 
+    // Dispose resources used by this provider
+    public dispose(): void {
+        try {
+            // If the view exists, dispose of any attached resources
+            try {
+                this.disposables.forEach(d => { try { d.dispose(); } catch (e) { /* ignore */ } });
+                this.disposables = [];
+            } catch (e) { /* ignore */ }
+            this._view = undefined;
+        } catch (e) {
+            // ignore
+        }
+    }
+
     private _getHtmlForWebview(webview: vscode.Webview) {
         const config = vscode.workspace.getConfiguration('flinkSqlWorkbench');
 
@@ -332,9 +349,9 @@ export class SettingsWebviewProvider implements vscode.WebviewViewProvider {
                 <h3>Gateway Connection</h3>
                 <div class="form-group">
                     <label for="gateway-url">Gateway URL</label>
-                    <input type="text" id="gateway-url" value="${config.get('gateway.url', 'http://localhost:8083')}" 
-                           onchange="updateSetting('flinkSqlWorkbench.gateway.url', this.value)">
-                    <div class="description">Full URL to the Flink SQL Gateway (e.g., http://localhost:8083)</div>
+              <input type="text" id="gateway-url" value="${config.get('gateway.url', DEFAULT_FLINK_GATEWAY_URL)}" 
+                  onchange="updateSetting('flinkSqlWorkbench.gateway.url', this.value)">
+              <div class="description">Full URL to the Flink SQL Gateway (e.g., ${DEFAULT_FLINK_GATEWAY_URL})</div>
                 </div>
                 
                 <div class="form-group">

@@ -59,7 +59,7 @@ function initializeEditor() {
             'AND', 'OR', 'NOT', 'NULL', 'IS', 'IN', 'BETWEEN', 'LIKE', 'EXISTS', 'CASE',
             'WHEN', 'THEN', 'ELSE', 'END', 'IF', 'WHILE', 'FOR', 'BEGIN', 'COMMIT', 'ROLLBACK',
             // Flink specific keywords
-            'WATERMARK', 'FOR', 'SYSTEM_TIME', 'PROCTIME', 'ROWTIME', 'TEMPORARY', 'CATALOG',
+            'WATERMARK', 'SYSTEM_TIME', 'PROCTIME', 'ROWTIME', 'TEMPORARY', 'CATALOG',
             'CONNECTOR', 'FORMAT', 'OPTIONS', 'PARTITIONED', 'TBLPROPERTIES', 'SHOW', 'DESCRIBE',
             'EXPLAIN', 'USE', 'RESET', 'SET', 'HELP'
         ],
@@ -237,7 +237,9 @@ function setupEventHandlers() {
 }
 
 function executeQuery() {
-    if (!editor || isExecuting) return;
+    if (!editor || isExecuting) {
+        return;
+    }
 
     const selection = editor.getSelection();
     let query;
@@ -265,16 +267,44 @@ function executeQuery() {
 }
 
 function formatSql() {
-    if (!editor) return;
+    if (!editor) {
+        return;
+    }
 
-    // Basic SQL formatting - you could enhance this with a proper SQL formatter
     const sql = editor.getValue();
-    const formatted = sql
-        .replace(/\s+/g, ' ')
-        .replace(/,\s*/g, ',\n  ')
-        .replace(/\b(SELECT|FROM|WHERE|JOIN|GROUP BY|ORDER BY|HAVING|UNION|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER)\b/gi, '\n$1')
-        .replace(/\n\s*\n/g, '\n')
-        .trim();
+    let formatted = sql;
+
+    try {
+        // Prefer a bundled sql-formatter if available. The bundler (webpack) will
+        // provide `require` at bundle time so this works when the extension is built.
+        const sqlFormatterModule = (typeof sqlFormatter !== 'undefined') ? sqlFormatter :
+            (typeof require !== 'undefined' ? require('sql-formatter') : null);
+
+        if (sqlFormatterModule && typeof sqlFormatterModule.format === 'function') {
+            // sql-formatter exports a `format` function
+            formatted = sqlFormatterModule.format(sql, { language: 'sql', uppercase: true });
+        } else if (sqlFormatterModule && typeof sqlFormatterModule === 'function') {
+            // defensive: in some module shapes the export may be the function itself
+            formatted = sqlFormatterModule(sql);
+        } else {
+            // Fallback to lightweight ad-hoc formatting if the formatter isn't available
+            formatted = sql
+                .replace(/\s+/g, ' ')
+                .replace(/,\s*/g, ',\n  ')
+                .replace(/\b(SELECT|FROM|WHERE|JOIN|GROUP BY|ORDER BY|HAVING|UNION|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER)\b/gi, '\n$1')
+                .replace(/\n\s*\n/g, '\n')
+                .trim();
+        }
+    } catch (err) {
+        // If anything goes wrong, log and fallback to ad-hoc formatter
+        console.warn('SQL formatter failed, using fallback formatting', err);
+        formatted = sql
+            .replace(/\s+/g, ' ')
+            .replace(/,\s*/g, ',\n  ')
+            .replace(/\b(SELECT|FROM|WHERE|JOIN|GROUP BY|ORDER BY|HAVING|UNION|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER)\b/gi, '\n$1')
+            .replace(/\n\s*\n/g, '\n')
+            .trim();
+    }
 
     editor.setValue(formatted);
 }

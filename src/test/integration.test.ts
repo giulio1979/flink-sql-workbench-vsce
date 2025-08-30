@@ -1,7 +1,8 @@
 import * as assert from 'assert';
 import axios from 'axios';
+import { DEFAULT_FLINK_GATEWAY_URL } from '../config';
 
-const FLINK_GATEWAY_URL = process.env.FLINK_GATEWAY_URL || 'http://localhost:8083';
+const FLINK_GATEWAY_URL = process.env.FLINK_GATEWAY_URL || DEFAULT_FLINK_GATEWAY_URL;
 
 suite('Flink SQL Gateway Integration', () => {
     if (!process.env.RUN_INTEGRATION) {

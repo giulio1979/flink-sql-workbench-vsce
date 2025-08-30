@@ -3,13 +3,14 @@ import sinon from 'sinon';
 import { StatementExecutionEngine } from '../services/StatementExecutionEngine';
 import { SessionManager } from '../services/SessionManager';
 import { FlinkApiService } from '../services/FlinkApiService';
+import { DEFAULT_FLINK_GATEWAY_URL } from '../config';
 
 suite('StatementExecutionEngine unit tests', () => {
     let sessionManager: SessionManager;
     let flinkApi: FlinkApiService;
 
     setup(() => {
-        flinkApi = new FlinkApiService('http://localhost:8083');
+    flinkApi = new FlinkApiService(DEFAULT_FLINK_GATEWAY_URL);
         sessionManager = SessionManager.getInstance(flinkApi);
     });
 

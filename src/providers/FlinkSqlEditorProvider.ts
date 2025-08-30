@@ -7,6 +7,7 @@ import { logger } from '../services/logger';
 
 export class FlinkSqlEditorProvider implements vscode.CustomTextEditorProvider {
     private executionEngines: Map<string, StatementExecutionEngine> = new Map();
+    private disposables: vscode.Disposable[] = [];
 
     constructor(
         private readonly context: vscode.ExtensionContext,
@@ -43,14 +44,19 @@ export class FlinkSqlEditorProvider implements vscode.CustomTextEditorProvider {
                 updateWebview();
             }
         });
+        this.disposables.push(changeDocumentSubscription);
 
-        // Make sure we get rid of the listener when our editor is closed
-        webviewPanel.onDidDispose(() => {
-            changeDocumentSubscription.dispose();
+        // Make sure we get rid of the listeners when our editor is closed
+        const onDidDispose = webviewPanel.onDidDispose(() => {
+            // Dispose provider-local disposables for this editor instance
+            try {
+                this.disposables.forEach(d => { try { d.dispose(); } catch (e) { /* ignore */ } });
+            } catch (e) { /* ignore */ }
         });
+        this.disposables.push(onDidDispose);
 
         // Receive message from the webview
-        webviewPanel.webview.onDidReceiveMessage(async (message) => {
+    const messageListener = webviewPanel.webview.onDidReceiveMessage(async (message) => {
             switch (message.type) {
                 case 'executeQuery':
                     await this.executeQueryWithDeltaStream(message.query, webviewPanel);
@@ -60,6 +66,7 @@ export class FlinkSqlEditorProvider implements vscode.CustomTextEditorProvider {
                     break;
             }
         });
+    this.disposables.push(messageListener);
 
         // Initialize webview content
         updateWebview();

@@ -9,7 +9,42 @@ import {
     GlobalStatementEvent
 } from './services';
 import { QueryResult } from './types';
+import { DEFAULT_FLINK_GATEWAY_URL } from './config';
+import { escapeHtml } from './utils/html';
+import { normalizeError } from './utils/errors';
 import { ExecutionResult } from './services/StatementExecutionEngine';
+
+// Instrumentation: capture DisposableStore warning stacks for triage
+const _origConsoleError = console.error.bind(console);
+const _origConsoleWarn = console.warn.bind(console);
+const disposableWarningStacks: string[] = [];
+console.error = (...args: any[]) => {
+    try {
+        const msg = args && args.length > 0 ? String(args[0]) : '';
+        if (msg && msg.includes('Trying to add a disposable to a DisposableStore')) {
+            const stack = new Error('Captured disposable add stack').stack || '';
+            disposableWarningStacks.push(stack);
+            // Also write to logger for easier discovery
+            try { logger.warn('Captured DisposableStore add warning: ' + msg); logger.warn(stack); } catch (e) { /* ignore */ }
+        }
+    } catch (e) {
+        // ignore instrumentation errors
+    }
+    return _origConsoleError(...args);
+};
+console.warn = (...args: any[]) => {
+    try {
+        const msg = args && args.length > 0 ? String(args[0]) : '';
+        if (msg && msg.includes('Trying to add a disposable to a DisposableStore')) {
+            const stack = new Error('Captured disposable add stack').stack || '';
+            disposableWarningStacks.push(stack);
+            try { logger.warn('Captured DisposableStore add warning (warn): ' + msg); logger.warn(stack); } catch (e) { /* ignore */ }
+        }
+    } catch (e) {
+        // ignore
+    }
+    return _origConsoleWarn(...args);
+};
 
 // Import providers
 import { FlinkSqlEditorProvider } from './providers/FlinkSqlEditorProvider';
@@ -36,6 +71,9 @@ let settingsProvider: SettingsWebviewProvider;
 // Track user-initiated SQL executions
 const userInitiatedStatements = new Set<string>();
 
+// Extension lifecycle flag used to avoid adding disposables after deactivate
+let extensionActive = false;
+
 // Helper function to mark a statement as user-initiated
 const markUserInitiated = (statementId: string) => {
     userInitiatedStatements.add(statementId);
@@ -61,6 +99,45 @@ export function activate(context: vscode.ExtensionContext) {
     logger.info('Activating Flink SQL Workbench extension with new robust services...');
 
     try {
+        extensionActive = true;
+        // Guard context.subscriptions.push to avoid noisy "DisposableStore already disposed" errors
+        try {
+            const subs: any = context.subscriptions;
+            const origPush = subs.push.bind(subs);
+            subs.push = (...items: any[]) => {
+                // If extension is deactivating or deactivated, skip adding disposables
+                if (!extensionActive) {
+                    try {
+                        logger.warn('Skipping context.subscriptions.push because extension is not active. This prevents DisposableStore warnings.');
+                        logger.warn(`Skipped items: ${items.map(i => i && i.constructor ? i.constructor.name : String(i)).join(', ')}`);
+                        logger.warn(`Caller stack: ${new Error().stack}`);
+                    } catch (e) {
+                        // ignore logging errors
+                    }
+                    return subs.length;
+                }
+
+                try {
+                    try {
+                        logger.debug('context.subscriptions.push called', { itemsCount: items.length });
+                        logger.debug('push caller stack: ' + (new Error().stack || 'no-stack'));
+                    } catch (e) { /* ignore logging errors */ }
+                    return origPush(...items);
+                } catch (err: any) {
+                    logger.warn('context.subscriptions.push failed (store may be disposed). This is being caught to avoid noisy leaks.');
+                    try {
+                        logger.warn(`push error: ${err && err.message ? err.message : String(err)}`);
+                        logger.warn(`push stack: ${err && err.stack ? err.stack : new Error().stack}`);
+                    } catch (e) {
+                        // ignore logging errors
+                    }
+                    return subs.length;
+                }
+            };
+        } catch (e) {
+            // if wrapping fails, continue without it
+            logger.warn('Failed to wrap context.subscriptions.push for safety');
+        }
         // Initialize services
         initializeServices();
         
@@ -74,9 +151,13 @@ export function activate(context: vscode.ExtensionContext) {
         setupEventListeners();
         
         logger.info('Flink SQL Workbench extension activated successfully');
-    } catch (error: any) {
-        logger.error(`Failed to activate extension: ${error.message}`);
-        vscode.window.showErrorMessage(`Failed to activate Flink SQL Workbench: ${error.message}`);
+    } catch (error) {
+        const ne = normalizeError(error);
+        logger.error(`Failed to activate extension: ${ne.message}`);
+        if (ne.stack) {
+            logger.error(ne.stack);
+        }
+        vscode.window.showErrorMessage(`Failed to activate Flink SQL Workbench: ${ne.message}`);
     }
 }
 
@@ -87,7 +168,7 @@ function initializeServices(): void {
     const gatewayConfig = vscode.workspace.getConfiguration('flinkSqlWorkbench.gateway');
     
     // Initialize FlinkApiService
-    const url = gatewayConfig.get<string>('url', 'http://localhost:8083');
+    const url = gatewayConfig.get<string>('url', DEFAULT_FLINK_GATEWAY_URL);
     flinkApi = new FlinkApiService(url);
     
     // Set credentials if provided
@@ -667,12 +748,12 @@ function registerCommands(context: vscode.ExtensionContext): void {
                 <body>
                     <h2>Job Details</h2>
                     <div class="job-info">
-                        <div><span class="label">Job ID:</span><span class="value">${job.id}</span></div>
-                        <div><span class="label">Name:</span><span class="value">${job.name}</span></div>
-                        <div><span class="label">Status:</span><span class="value status-${job.status.toLowerCase()}">${job.status}</span></div>
-                        <div><span class="label">Start Time:</span><span class="value">${job.startTime}</span></div>
-                        ${job.endTime ? `<div><span class="label">End Time:</span><span class="value">${job.endTime}</span></div>` : ''}
-                        ${job.duration ? `<div><span class="label">Duration:</span><span class="value">${job.duration}</span></div>` : ''}
+                        <div><span class="label">Job ID:</span><span class="value">${escapeHtml(job.id)}</span></div>
+                        <div><span class="label">Name:</span><span class="value">${escapeHtml(job.name)}</span></div>
+                        <div><span class="label">Status:</span><span class="value status-${escapeHtml((job.status || '').toLowerCase())}">${escapeHtml(job.status)}</span></div>
+                        <div><span class="label">Start Time:</span><span class="value">${escapeHtml(job.startTime)}</span></div>
+                        ${job.endTime ? `<div><span class="label">End Time:</span><span class="value">${escapeHtml(job.endTime)}</span></div>` : ''}
+                        ${job.duration ? `<div><span class="label">Duration:</span><span class="value">${escapeHtml(job.duration)}</span></div>` : ''}
                     </div>
                     
                     <h3>Actions</h3>
@@ -700,7 +781,7 @@ function setupEventListeners(): void {
             
             // Reinitialize services with new configuration
             const gatewayConfig = vscode.workspace.getConfiguration('flinkSqlWorkbench.gateway');
-            const url = gatewayConfig.get<string>('url', 'http://localhost:8083');
+            const url = gatewayConfig.get<string>('url', DEFAULT_FLINK_GATEWAY_URL);
             
             flinkApi.setBaseUrl(url);
             
@@ -774,14 +855,27 @@ function setupEventListeners(): void {
 export function deactivate(): void {
     logger.info('Deactivating Flink SQL Workbench extension...');
     
+    // Mark extension as inactive to prevent late disposable registrations
+    extensionActive = false;
     try {
         // Dispose services
         if (statementManager) {
-            statementManager.dispose();
+            try { statementManager.dispose(); } catch (e) { /* ignore */ }
         }
-        
+
         if (flinkApi) {
-            flinkApi.dispose();
+            try { flinkApi.dispose(); } catch (e) { /* ignore */ }
+        }
+
+        // Dispose providers if present
+        if (resultsProvider && typeof resultsProvider.dispose === 'function') {
+            try { resultsProvider.dispose(); } catch (e) { /* ignore */ }
+        }
+        if (sessionsProvider && typeof sessionsProvider.dispose === 'function') {
+            try { sessionsProvider.dispose(); } catch (e) { /* ignore */ }
+        }
+        if (settingsProvider && typeof settingsProvider.dispose === 'function') {
+            try { settingsProvider.dispose(); } catch (e) { /* ignore */ }
         }
         
         logger.info('Extension deactivated successfully');

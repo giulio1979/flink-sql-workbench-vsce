@@ -15,6 +15,16 @@ export class SessionsProvider implements vscode.TreeDataProvider<SessionItem> {
         this.refresh();
     }
 
+    // Dispose any resources held by this provider
+    public dispose(): void {
+        try {
+            // No long-lived disposables currently, but keep defensive cleanup
+            this._onDidChangeTreeData.dispose();
+        } catch (e) {
+            // ignore
+        }
+    }
+
     refresh(): void {
         this.loadCurrentSession();
         this._onDidChangeTreeData.fire();

@@ -2,13 +2,14 @@ import * as assert from 'assert';
 import sinon from 'sinon';
 import { SessionManager } from '../services/SessionManager';
 import { FlinkApiService } from '../services/FlinkApiService';
+import { DEFAULT_FLINK_GATEWAY_URL } from '../config';
 
 suite('SessionManager unit tests', () => {
     let flinkApi: FlinkApiService;
     let manager: SessionManager;
 
     setup(() => {
-        flinkApi = new FlinkApiService('http://localhost:8083');
+    flinkApi = new FlinkApiService(DEFAULT_FLINK_GATEWAY_URL);
         manager = SessionManager.getInstance(flinkApi);
     });
 

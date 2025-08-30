@@ -1,9 +1,10 @@
 import * as assert from 'assert';
 import nock from 'nock';
 import { FlinkApiService } from '../services/FlinkApiService';
+import { DEFAULT_FLINK_GATEWAY_URL } from '../config';
 
 suite('FlinkApiService unit tests', () => {
-    const baseUrl = 'http://localhost:8083';
+    const baseUrl = DEFAULT_FLINK_GATEWAY_URL;
     const flink = new FlinkApiService(baseUrl);
 
     teardown(() => {

@@ -1,10 +1,12 @@
 import * as vscode from 'vscode';
 import { QueryResult } from '../types';
+import { escapeHtml, generateNonce } from '../utils/html';
 
 export class ResultsWebviewProvider {
     private panel: vscode.WebviewPanel | undefined;
     private outputChannel: vscode.OutputChannel;
     private currentResult?: QueryResult;
+    private disposables: vscode.Disposable[] = [];
 
     constructor(private readonly context: vscode.ExtensionContext) {
         this.outputChannel = vscode.window.createOutputChannel('Flink SQL Results');
@@ -26,9 +28,13 @@ export class ResultsWebviewProvider {
 
             this.panel.webview.html = this.getWelcomeHtml();
 
-            this.panel.onDidDispose(() => {
+            // Register dispose handler locally to avoid adding to the global
+            // `context.subscriptions` (which may be disposed by the test
+            // harness during teardown and cause noisy warnings).
+            const onDidDispose = this.panel.onDidDispose(() => {
                 this.panel = undefined;
-            }, null, this.context.subscriptions);
+            });
+            this.disposables.push(onDidDispose);
         }
     }
 
@@ -49,25 +55,27 @@ export class ResultsWebviewProvider {
             this.outputChannel.appendLine(`Sample rows: ${JSON.stringify(results.results, null, 2)}`);
         }
         
-        if (this.panel) {
-            this.panel.webview.html = this.getResultsHtml(results);
-        } else {
+            if (this.panel) {
+                this.panel.webview.html = this.getResultsHtml(results);
+            } else {
             // If panel doesn't exist, show it first
             this.show();
             // Set the HTML after the panel is created
             setTimeout(() => {
                 if (this.panel) {
-                    this.panel.webview.html = this.getResultsHtml(results);
+                        this.panel.webview.html = this.getResultsHtml(results);
                 }
             }, 100);
         }
     }
 
     private getWelcomeHtml(): string {
+        const nonce = generateNonce();
         return `<!DOCTYPE html>
         <html>
         <head>
             <meta charset="UTF-8">
+            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
             <title>Flink SQL Results</title>
         </head>
         <body>
@@ -111,7 +119,7 @@ export class ResultsWebviewProvider {
 
         const headers = result.columns.map(column => {
             const columnName = typeof column === 'string' ? column : column.name || 'Unknown';
-            return `<th>${columnName}</th>`;
+            return `<th>${escapeHtml(columnName)}</th>`;
         }).join('');
 
         const rows = result.results.map((row: any, rowIndex: number) => {
@@ -126,11 +134,11 @@ export class ResultsWebviewProvider {
                 // Handle fields array format (from React implementation)
                 cells = row.fields.map((field: any) => {
                     const cellValue = field !== null && field !== undefined ? String(field) : 'NULL';
-                    return `<td>${cellValue}</td>`;
+                        return `<td>${escapeHtml(cellValue)}</td>`;
                 });
             } else if (Array.isArray(row)) {
                 // Handle array format
-                cells = row.map((cell: any) => `<td>${cell !== null && cell !== undefined ? String(cell) : 'NULL'}</td>`);
+                cells = row.map((cell: any) => `<td>${escapeHtml(cell !== null && cell !== undefined ? String(cell) : 'NULL')}</td>`);
             } else if (row && typeof row === 'object') {
                 // Handle object format with column names as keys
                 cells = result.columns.map((column, colIndex) => {
@@ -154,7 +162,7 @@ export class ResultsWebviewProvider {
                     }
                     
                     const cellValue = value !== null && value !== undefined ? String(value) : 'NULL';
-                    return `<td>${cellValue}</td>`;
+                    return `<td>${escapeHtml(cellValue)}</td>`;
                 });
             } else {
                 // Fallback: create empty cells
@@ -165,10 +173,12 @@ export class ResultsWebviewProvider {
             return `<tr>${cells.join('')}</tr>`;
         }).join('');
 
+        const nonce = generateNonce();
         return `<!DOCTYPE html>
         <html>
         <head>
             <meta charset="UTF-8">
+            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
             <title>Query Results</title>
             <style>
                 table { border-collapse: collapse; width: 100%; }
@@ -184,5 +194,37 @@ export class ResultsWebviewProvider {
             </table>
         </body>
         </html>`;
+    }
+
+    // Dispose resources held by this provider
+    public dispose(): void {
+        try {
+            if (this.panel) {
+                try {
+                    this.panel.dispose();
+                } catch (e) {
+                    // ignore disposal errors
+                }
+                this.panel = undefined;
+            }
+
+            // Dispose registered disposables local to this provider
+            try {
+                this.disposables.forEach(d => {
+                    try { d.dispose(); } catch (e) { /* ignore */ }
+                });
+                this.disposables = [];
+            } catch (e) {
+                // ignore
+            }
+
+            try {
+                this.outputChannel.dispose();
+            } catch (e) {
+                // ignore
+            }
+        } catch (error) {
+            // swallow - defensive cleanup should not throw
+        }
     }
 }
