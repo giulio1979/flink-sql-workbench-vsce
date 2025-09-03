@@ -6,6 +6,7 @@ ENV PASSWORD="demo"
 RUN code-server --install-extension IuliusHutuleac.flink-sql-workbench && \
     code-server --install-extension redhat.vscode-yaml && \
     code-server --install-extension redhat.vscode-xml && \
+    code-server --install-extension iuliushutuleac.kafka-connect-admin && \
     code-server --install-extension redhat.vscode-kaoto
 USER 0
 RUN apt update && apt install -y jq

@@ -3,6 +3,7 @@ FROM codercom/code-server:latest
 # Install a VS Code extension
 ENV PASSWORD="demo"
 RUN code-server --install-extension IuliusHutuleac.flink-sql-workbench && \
+    code-server --install-extension iuliushutuleac.kafka-connect-admin && \
     code-server --install-extension redhat.vscode-yaml && \
     code-server --install-extension redhat.vscode-xml 
 USER 0
