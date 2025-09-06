@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { DEFAULT_FLINK_GATEWAY_URL } from '../config';
+import { CredentialService } from '../services/CredentialService';
 
 export class SettingsWebviewProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'flink-sql-workbench.settings';
@@ -49,6 +50,14 @@ export class SettingsWebviewProvider implements vscode.WebviewViewProvider {
                     this.testConnection();
                     break;
                 }
+                case 'openCredentialManager': {
+                    this.openCredentialManager();
+                    break;
+                }
+                case 'refreshConnections': {
+                    this.refresh();
+                    break;
+                }
             }
         });
     this.disposables.push(messageListener);
@@ -69,10 +78,8 @@ export class SettingsWebviewProvider implements vscode.WebviewViewProvider {
             if (selection === 'Reset') {
                 const config = vscode.workspace.getConfiguration('flinkSqlWorkbench');
                 const keys = [
-                    'gateway.url', 'gateway.host', 'gateway.port', 'gateway.useProxy',
-                    'gateway.apiVersion', 'gateway.authentication.username', 
-                    'gateway.authentication.password', 'gateway.authentication.apiToken',
-                    'gateway.sessionName', 'gateway.timeout', 'gateway.maxRetries',
+                    'gateway.url', 'gateway.connectionId', 'gateway.useProxy',
+                    'gateway.apiVersion', 'gateway.sessionName', 'gateway.timeout', 'gateway.maxRetries',
                     'session.properties', 'session.autoReconnect', 'session.keepAliveInterval',
                     'editor.autoComplete', 'editor.autoSave', 'results.maxRows',
                     'results.pageSize', 'results.autoRefresh', 'results.refreshInterval',
@@ -95,16 +102,9 @@ export class SettingsWebviewProvider implements vscode.WebviewViewProvider {
         const settings = {
             gateway: {
                 url: config.get('gateway.url'),
-                host: config.get('gateway.host'),
-                port: config.get('gateway.port'),
+                connectionId: config.get('gateway.connectionId'),
                 useProxy: config.get('gateway.useProxy'),
                 apiVersion: config.get('gateway.apiVersion'),
-                authentication: {
-                    username: config.get('gateway.authentication.username'),
-                    // Don't export passwords for security
-                    password: '',
-                    apiToken: ''
-                },
                 sessionName: config.get('gateway.sessionName'),
                 timeout: config.get('gateway.timeout'),
                 maxRetries: config.get('gateway.maxRetries')
@@ -200,22 +200,21 @@ export class SettingsWebviewProvider implements vscode.WebviewViewProvider {
             
             // Load configuration
             const gatewayConfig = vscode.workspace.getConfiguration('flinkSqlWorkbench.gateway');
-            let url = gatewayConfig.get<string>('url', '');
+            const url = gatewayConfig.get<string>('url', '');
+            
             if (!url) {
-                const host = gatewayConfig.get<string>('host', 'localhost');
-                const port = gatewayConfig.get<number>('port', 8083);
-                url = `http://${host}:${port}`;
+                vscode.window.showErrorMessage('Gateway URL is not configured');
+                return;
             }
             
             flinkApi.setBaseUrl(url);
             
-            // Set credentials if provided
-            const username = gatewayConfig.get<string>('authentication.username');
-            const password = gatewayConfig.get<string>('authentication.password');
-            const apiToken = gatewayConfig.get<string>('authentication.apiToken');
-            
-            if (username || password || apiToken) {
-                flinkApi.setCredentials(username, password, apiToken);
+            // Try to load credentials from Credential Manager
+            try {
+                await flinkApi.initializeFromCredentialManager();
+            } catch (error) {
+                // No credentials configured, test connection without authentication
+                console.log('Testing connection without authentication');
             }
             
             // Test connection by creating a session
@@ -229,6 +228,15 @@ export class SettingsWebviewProvider implements vscode.WebviewViewProvider {
             
         } catch (error) {
             vscode.window.showErrorMessage(`Connection test failed: ${error}`);
+        }
+    }
+
+    private async openCredentialManager() {
+        try {
+            const credentialService = CredentialService.getInstance();
+            await credentialService.openCredentialManager();
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to open Credential Manager: ${error}`);
         }
     }
 
@@ -306,6 +314,14 @@ export class SettingsWebviewProvider implements vscode.WebviewViewProvider {
                     display: flex;
                     align-items: center;
                 }
+                .button-group {
+                    display: flex;
+                    gap: 10px;
+                    margin-top: 10px;
+                }
+                .button-group button {
+                    flex: 1;
+                }
                 button {
                     background-color: var(--vscode-button-background);
                     color: var(--vscode-button-foreground);
@@ -348,10 +364,10 @@ export class SettingsWebviewProvider implements vscode.WebviewViewProvider {
             <div class="section">
                 <h3>Gateway Connection</h3>
                 <div class="form-group">
-                    <label for="gateway-url">Gateway URL</label>
+                    <label for="gateway-url">Gateway URL (Fallback)</label>
               <input type="text" id="gateway-url" value="${config.get('gateway.url', DEFAULT_FLINK_GATEWAY_URL)}" 
                   onchange="updateSetting('flinkSqlWorkbench.gateway.url', this.value)">
-              <div class="description">Full URL to the Flink SQL Gateway (e.g., ${DEFAULT_FLINK_GATEWAY_URL})</div>
+              <div class="description">⚠️ DEPRECATED: Use Connection Manager instead. Fallback URL when no connectionId is configured</div>
                 </div>
                 
                 <div class="form-group">
@@ -388,24 +404,22 @@ export class SettingsWebviewProvider implements vscode.WebviewViewProvider {
             </div>
 
             <div class="section">
-                <h3>Authentication</h3>
+                <h3>Connection Management</h3>
                 <div class="form-group">
-                    <label for="username">Username (Basic Auth)</label>
-                    <input type="text" id="username" value="${config.get('gateway.authentication.username', '')}" 
-                           onchange="updateSetting('flinkSqlWorkbench.gateway.authentication.username', this.value)">
+                    <label for="connection-id">Connection ID</label>
+                    <input type="text" id="connection-id" value="${config.get('gateway.connectionId', '')}" 
+                           onchange="updateSetting('flinkSqlWorkbench.gateway.connectionId', this.value)">
+                    <div class="description">ID of the connection from Credential Manager to use for authentication</div>
                 </div>
                 
-                <div class="form-group">
-                    <label for="password">Password (Basic Auth)</label>
-                    <input type="password" id="password" value="${config.get('gateway.authentication.password', '')}" 
-                           onchange="updateSetting('flinkSqlWorkbench.gateway.authentication.password', this.value)">
+                <div class="button-group">
+                    <button onclick="openCredentialManager()">Open Connection Manager</button>
+                    <button onclick="refreshConnections()">Refresh</button>
                 </div>
                 
-                <div class="form-group">
-                    <label for="api-token">API Token (Bearer Auth)</label>
-                    <input type="password" id="api-token" value="${config.get('gateway.authentication.apiToken', '')}" 
-                           onchange="updateSetting('flinkSqlWorkbench.gateway.authentication.apiToken', this.value)">
-                    <div class="description">If provided, API token takes precedence over basic auth</div>
+                <div class="description">
+                    <p>Use the Credential Manager extension to securely store and manage connection credentials for Flink Gateway.</p>
+                    <p>After creating a connection in the Credential Manager, enter its ID above to use it for authentication.</p>
                 </div>
             </div>
 
@@ -554,6 +568,18 @@ export class SettingsWebviewProvider implements vscode.WebviewViewProvider {
                 function resetSettings() {
                     vscode.postMessage({
                         type: 'resetSettings'
+                    });
+                }
+
+                function openCredentialManager() {
+                    vscode.postMessage({
+                        type: 'openCredentialManager'
+                    });
+                }
+
+                function refreshConnections() {
+                    vscode.postMessage({
+                        type: 'refreshConnections'
                     });
                 }
             </script>

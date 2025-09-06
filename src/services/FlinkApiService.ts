@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { createModuleLogger } from './logger';
+import { CredentialService } from './CredentialService';
 
 const log = createModuleLogger('FlinkApiService');
 
@@ -61,6 +62,50 @@ export class FlinkApiService {
         log.traceEnter('setCredentials', { username: username ? '***' : '', hasPassword: !!password, hasApiToken: !!apiToken });
         this.credentials = { username, password, apiToken };
         log.traceExit('setCredentials');
+    }
+
+    /**
+     * Initialize credentials from the Credential Manager
+     */
+    async initializeFromCredentialManager(): Promise<void> {
+        log.traceEnter('initializeFromCredentialManager');
+        
+        try {
+            const credentialService = CredentialService.getInstance();
+            const connection = await credentialService.getCurrentConnection();
+            
+            if (connection) {
+                log.info('Using credentials from Credential Manager', { connectionId: connection.id, connectionName: connection.name });
+                
+                // Update base URL if provided by connection
+                if (connection.url) {
+                    this.setBaseUrl(connection.url);
+                }
+                
+                // Set credentials from headers
+                if (connection.headers?.['Authorization']) {
+                    const authHeader = connection.headers['Authorization'];
+                    if (authHeader.startsWith('Basic ')) {
+                        // Extract credentials from basic auth header
+                        const base64Credentials = authHeader.replace('Basic ', '');
+                        const credentials = Buffer.from(base64Credentials, 'base64').toString('ascii');
+                        const [username, password] = credentials.split(':');
+                        this.setCredentials(username, password);
+                    } else if (authHeader.startsWith('Bearer ')) {
+                        // Extract token from bearer auth header
+                        const token = authHeader.replace('Bearer ', '');
+                        this.setCredentials(undefined, undefined, token);
+                    }
+                }
+            } else {
+                log.info('No connection configured in Credential Manager, using direct configuration');
+            }
+        } catch (error) {
+            log.error('Failed to initialize from Credential Manager:', error);
+            // Fall back to direct configuration if credential manager fails
+        }
+        
+        log.traceExit('initializeFromCredentialManager');
     }
 
     private getProxyUrl(endpoint: string): string {
@@ -442,18 +487,24 @@ export class FlinkApiService {
 
     // Extract root cause from Java exception stack trace
     private extractRootCause(errors: any[]): string | null {
-        if (!errors || !Array.isArray(errors)) return null;
+        if (!errors || !Array.isArray(errors)) {
+            return null;
+        }
         
         // Look for the error message that contains the full stack trace
         const stackTraceError = errors.find(error => 
             typeof error === 'string' && error.includes('Caused by:')
         );
         
-        if (!stackTraceError) return null;
+        if (!stackTraceError) {
+            return null;
+        }
         
         // Split by "Caused by:" and get the last one
         const causedByParts = stackTraceError.split('Caused by:');
-        if (causedByParts.length <= 1) return null;
+        if (causedByParts.length <= 1) {
+            return null;
+        }
         
         // Get the last "Caused by:" section
         const rootCauseSection = causedByParts[causedByParts.length - 1].trim();

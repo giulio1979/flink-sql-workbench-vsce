@@ -52,13 +52,34 @@ A comprehensive VS Code extension for editing, executing, and managing Apache Fl
 ## ⚙️ Configuration
 
 ### Quick Setup
-1. Open VS Code settings (Ctrl+,)
-2. Search for "Flink SQL Workbench"
-3. Configure your Flink SQL Gateway URL: `http://localhost:8083`
+1. Install the **Kafka Credential Manager** extension (dependency)
+2. Open VS Code settings (Ctrl+,)
+3. Search for "Flink SQL Workbench"
+4. Configure your Flink SQL Gateway URL: `http://localhost:8083`
+5. Use the Credential Manager to securely store your gateway credentials
 
-### Gateway Configuration
+### Connection Management
 
-#### Basic Connection
+This extension now integrates with the **Kafka Credential Manager** extension for secure credential storage. 
+
+#### Setting up Connections
+1. Open the Connection Manager: `Ctrl+Shift+C` or use Command Palette
+2. Create a new connection with your Flink Gateway details
+3. Set the connection type to "connect" 
+4. Configure authentication (none, basic, or bearer token)
+5. In Flink SQL Workbench settings, set the Connection ID to use your stored connection
+
+#### Gateway Configuration
+
+#### Using Credential Manager (Recommended)
+```json
+{
+  "flinkSqlWorkbench.gateway.connectionId": "my-flink-gateway-connection",
+  "flinkSqlWorkbench.gateway.apiVersion": "auto"
+}
+```
+
+#### Fallback Configuration (Legacy)
 ```json
 {
   "flinkSqlWorkbench.gateway.url": "http://localhost:8083",
@@ -67,20 +88,10 @@ A comprehensive VS Code extension for editing, executing, and managing Apache Fl
 }
 ```
 
-#### With Authentication
-```json
-{
-  "flinkSqlWorkbench.gateway.authentication.username": "admin",
-  "flinkSqlWorkbench.gateway.authentication.password": "password"
-}
-```
-
-#### Using Bearer Token
-```json
-{
-  "flinkSqlWorkbench.gateway.authentication.apiToken": "your-api-token"
-}
-```
+When a `connectionId` is configured, the extension will:
+- Use the URL from the stored connection
+- Apply authentication credentials automatically
+- Fall back to direct configuration if the connection is not found
 
 ### Session Configuration
 
@@ -210,19 +221,30 @@ A comprehensive VS Code extension for editing, executing, and managing Apache Fl
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `flinkSqlWorkbench.gateway.url` | string | `http://localhost:8083` | Flink SQL Gateway URL |
+| `flinkSqlWorkbench.gateway.connectionId` | string | `""` | **Recommended**: Connection ID from Credential Manager |
+| `flinkSqlWorkbench.gateway.url` | string | `http://localhost:8083` | ⚠️ **Deprecated**: Fallback Gateway URL when no connectionId is set |
 | `flinkSqlWorkbench.gateway.useProxy` | boolean | `false` | Use proxy for CORS issues |
 | `flinkSqlWorkbench.gateway.apiVersion` | string | `auto` | API version (v1, v2, auto) |
 | `flinkSqlWorkbench.gateway.timeout` | number | `30000` | Request timeout (ms) |
 | `flinkSqlWorkbench.gateway.maxRetries` | number | `3` | Max retry attempts |
 
-### Authentication Settings
+### Connection Management
 
-| Setting | Type | Default | Description |
-|---------|------|---------|-------------|
-| `flinkSqlWorkbench.gateway.authentication.username` | string | `""` | Basic auth username |
-| `flinkSqlWorkbench.gateway.authentication.password` | string | `""` | Basic auth password |
-| `flinkSqlWorkbench.gateway.authentication.apiToken` | string | `""` | Bearer token |
+Connection details (URL and authentication) are now managed through the **Kafka Credential Manager** extension. 
+
+**Recommended Approach:**
+1. Create connections in the Credential Manager 
+2. Reference them by ID in the `gateway.connectionId` setting
+3. The extension will automatically use the URL and credentials from the stored connection
+
+### Legacy Settings
+
+The following settings are deprecated and will be removed in future versions:
+- `flinkSqlWorkbench.gateway.authentication.username` 
+- `flinkSqlWorkbench.gateway.authentication.password`
+- `flinkSqlWorkbench.gateway.authentication.apiToken`
+
+Please migrate to using the Credential Manager extension for secure credential storage.
 
 ### Session Settings
 
@@ -316,7 +338,7 @@ Use VS Code workspace settings for project-specific configurations:
 // .vscode/settings.json
 {
   "flinkSqlWorkbench.gateway.url": "https://production-flink.example.com:8083",
-  "flinkSqlWorkbench.gateway.authentication.apiToken": "${FLINK_API_TOKEN}",
+  "flinkSqlWorkbench.gateway.connectionId": "production-flink-gateway",
   "flinkSqlWorkbench.session.properties": {
     "execution.runtime-mode": "streaming",
     "table.exec.resource.default-parallelism": "8"

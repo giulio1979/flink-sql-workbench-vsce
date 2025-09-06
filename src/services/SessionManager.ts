@@ -221,7 +221,7 @@ export class SessionManager {
 
     // Get session age in human readable format
     getSessionAge(): string {
-        if (!this.sessionStartTime) return 'No active session';
+        if (!this.sessionStartTime) {return 'No active session';}
         
         const ageMs = Date.now() - this.sessionStartTime;
         const ageMinutes = Math.floor(ageMs / 60000);

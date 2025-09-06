@@ -4,6 +4,7 @@ import {
     StatementManager, 
     SessionManager,
     FlinkGatewayServiceAdapter,
+    CredentialService,
     logger,
     NewSessionInfo,
     GlobalStatementEvent
@@ -53,6 +54,7 @@ import { SessionsProvider } from './providers/SessionsProvider';
 import { JobsProvider } from './providers/JobsProvider';
 import { CatalogProvider } from './providers/CatalogProvider';
 import { SettingsWebviewProvider } from './providers/SettingsWebviewProvider';
+import { ConnectionSelectorProvider } from './providers/ConnectionSelectorProvider';
 
 // Global services
 let flinkApi: FlinkApiService;
@@ -67,6 +69,7 @@ let sessionsProvider: SessionsProvider;
 let jobsProvider: JobsProvider;
 let catalogProvider: CatalogProvider;
 let settingsProvider: SettingsWebviewProvider;
+let connectionSelectorProvider: ConnectionSelectorProvider;
 
 // Track user-initiated SQL executions
 const userInitiatedStatements = new Set<string>();
@@ -164,21 +167,21 @@ export function activate(context: vscode.ExtensionContext) {
 function initializeServices(): void {
     logger.info('Initializing Flink services...');
     
-    // Load configuration
-    const gatewayConfig = vscode.workspace.getConfiguration('flinkSqlWorkbench.gateway');
+    // Initialize FlinkApiService without any default URL - will be set via connection selection
+    flinkApi = new FlinkApiService();
     
-    // Initialize FlinkApiService
-    const url = gatewayConfig.get<string>('url', DEFAULT_FLINK_GATEWAY_URL);
-    flinkApi = new FlinkApiService(url);
-    
-    // Set credentials if provided
-    const username = gatewayConfig.get<string>('authentication.username');
-    const password = gatewayConfig.get<string>('authentication.password');
-    const apiToken = gatewayConfig.get<string>('authentication.apiToken');
-    
-    if (username || password || apiToken) {
-        flinkApi.setCredentials(username, password, apiToken);
-    }
+    // Initialize credentials and URL from Credential Manager (async)
+    initializeCredentials().catch(error => {
+        logger.warn('Failed to initialize from Credential Manager:', error);
+        vscode.window.showWarningMessage(
+            'Failed to initialize Flink connection. Please select a connection using the Connections view.',
+            'Open Connections'
+        ).then(action => {
+            if (action === 'Open Connections') {
+                vscode.commands.executeCommand('workbench.view.explorer');
+            }
+        });
+    });
     
     // Initialize StatementManager and SessionManager
     statementManager = new StatementManager(flinkApi);
@@ -188,6 +191,19 @@ function initializeServices(): void {
     gatewayAdapter = new FlinkGatewayServiceAdapter(statementManager, sessionManager, flinkApi);
     
     logger.info('Services initialized successfully');
+}
+
+async function initializeCredentials(): Promise<void> {
+    logger.info('Initializing credentials...');
+    
+    try {
+        // Initialize from Credential Manager
+        await flinkApi.initializeFromCredentialManager();
+        logger.info('Successfully initialized credentials from Credential Manager');
+    } catch (error) {
+        logger.warn('Failed to initialize from Credential Manager:', error);
+        throw new Error('Connection setup required - please select a connection in the Connections view');
+    }
 }
 
 function registerProviders(context: vscode.ExtensionContext): void {
@@ -200,6 +216,7 @@ function registerProviders(context: vscode.ExtensionContext): void {
     jobsProvider = new JobsProvider(gatewayAdapter, context);
     catalogProvider = new CatalogProvider(gatewayAdapter, context);
     settingsProvider = new SettingsWebviewProvider(context.extensionUri);
+    connectionSelectorProvider = new ConnectionSelectorProvider(context);
 
     // Register custom editor provider
     context.subscriptions.push(
@@ -231,6 +248,11 @@ function registerProviders(context: vscode.ExtensionContext): void {
     context.subscriptions.push(
         vscode.window.createTreeView('flinkSqlCatalog', {
             treeDataProvider: catalogProvider
+        })
+    );
+    context.subscriptions.push(
+        vscode.window.createTreeView('flinkSqlConnections', {
+            treeDataProvider: connectionSelectorProvider
         })
     );
 
@@ -768,6 +790,99 @@ function registerCommands(context: vscode.ExtensionContext): void {
         })
     );
 
+    // Open Credential Manager command
+    context.subscriptions.push(
+        vscode.commands.registerCommand('flink-sql-workbench.openCredentialManager', async () => {
+            try {
+                const credentialService = CredentialService.getInstance();
+                await credentialService.openCredentialManager();
+            } catch (error: any) {
+                logger.error(`Error opening credential manager: ${error.message}`);
+                vscode.window.showErrorMessage(`Error opening credential manager: ${error.message}`);
+            }
+        })
+    );
+
+    // Connection management commands
+    context.subscriptions.push(
+        vscode.commands.registerCommand('flink-sql-workbench.selectConnection', async (connectionArg?: any) => {
+            try {
+                if (connectionArg && typeof connectionArg === 'object' && connectionArg.connectionId !== undefined) {
+                    // Direct selection from tree view or quick pick
+                    await connectionSelectorProvider.selectConnection(connectionArg.connectionId);
+                } else {
+                    // Show selection quick pick
+                    const connections = connectionSelectorProvider.getConnections();
+                    if (connections.length === 0) {
+                        const action = await vscode.window.showInformationMessage(
+                            'No Flink Gateway connections configured. Please create connections with type "flink-gateway" in the Credential Manager.',
+                            'Open Credential Manager',
+                            'Cancel'
+                        );
+                        if (action === 'Open Credential Manager') {
+                            const credentialService = CredentialService.getInstance();
+                            await credentialService.openCredentialManager();
+                        }
+                        return;
+                    }
+
+                    const items = connections.map((conn: any) => ({
+                        label: conn.name,
+                        description: conn.url,
+                        detail: conn.id === connectionSelectorProvider.getCurrentConnectionId() ? 'Currently selected' : '',
+                        connectionId: conn.id
+                    }));
+
+                    const selected = await vscode.window.showQuickPick(items, {
+                        placeHolder: 'Select a Flink connection'
+                    });
+
+                    if (selected) {
+                        await connectionSelectorProvider.selectConnection(selected.connectionId);
+                    }
+                }
+            } catch (error: any) {
+                logger.error(`Error selecting connection: ${error.message}`);
+                vscode.window.showErrorMessage(`Error selecting connection: ${error.message}`);
+            }
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('flink-sql-workbench.refreshConnections', () => {
+            connectionSelectorProvider.refresh();
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('flink-sql-workbench.testConnection', async (connectionItem?: any) => {
+            try {
+                let connectionId: string;
+                if (connectionItem && connectionItem.connectionId) {
+                    connectionId = connectionItem.connectionId;
+                } else {
+                    const currentConnectionId = connectionSelectorProvider.getCurrentConnectionId();
+                    if (!currentConnectionId) {
+                        vscode.window.showWarningMessage('No connection selected');
+                        return;
+                    }
+                    connectionId = currentConnectionId;
+                }
+
+                await vscode.window.withProgress({
+                    location: vscode.ProgressLocation.Notification,
+                    title: 'Testing connection...',
+                    cancellable: false
+                }, async () => {
+                    await connectionSelectorProvider.testConnection(connectionId);
+                });
+            } catch (error: any) {
+                logger.error(`Error testing connection: ${error.message}`);
+                vscode.window.showErrorMessage(`Error testing connection: ${error.message}`);
+            }
+        })
+    );
+
     logger.info('Commands registered successfully');
 }
 
@@ -779,18 +894,21 @@ function setupEventListeners(): void {
         if (e.affectsConfiguration('flinkSqlWorkbench.gateway')) {
             logger.info('Gateway configuration changed, reinitializing services...');
             
-            // Reinitialize services with new configuration
+            // Check if connectionId changed first (prioritize Credential Manager)
             const gatewayConfig = vscode.workspace.getConfiguration('flinkSqlWorkbench.gateway');
-            const url = gatewayConfig.get<string>('url', DEFAULT_FLINK_GATEWAY_URL);
+            const connectionId = gatewayConfig.get<string>('connectionId');
             
-            flinkApi.setBaseUrl(url);
-            
-            // Update credentials
-            const username = gatewayConfig.get<string>('authentication.username');
-            const password = gatewayConfig.get<string>('authentication.password');
-            const apiToken = gatewayConfig.get<string>('authentication.apiToken');
-            
-            flinkApi.setCredentials(username, password, apiToken);
+            if (connectionId) {
+                // Reinitialize from Credential Manager (will set both URL and credentials)
+                initializeCredentials().catch(error => {
+                    logger.warn('Failed to reinitialize from Credential Manager after config change:', error);
+                });
+            } else {
+                // Fall back to direct URL configuration
+                const fallbackUrl = gatewayConfig.get<string>('url', DEFAULT_FLINK_GATEWAY_URL);
+                flinkApi.setBaseUrl(fallbackUrl);
+                logger.info('Using fallback URL configuration:', fallbackUrl);
+            }
         }
     });
 

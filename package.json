@@ -16,6 +16,9 @@
     "vscode": "^1.103.0",
     "code-server": "^4.0.0"
   },
+  "extensionDependencies": [
+    "IuliusHutuleac.credential-manager"
+  ],
   "main": "./dist/extension.js",
   "publisher": "IuliusHutuleac",
   "contributes": {
@@ -134,33 +137,59 @@
         "command": "flink-sql-workbench.testNewConnection",
         "title": "🔧 Test New Services Connection",
         "icon": "$(plug)"
+      },
+      {
+        "command": "flink-sql-workbench.openCredentialManager",
+        "title": "Open Connection Manager",
+        "icon": "$(organization)"
+      },
+      {
+        "command": "flink-sql-workbench.selectConnection",
+        "title": "Select Connection"
+      },
+      {
+        "command": "flink-sql-workbench.refreshConnections",
+        "title": "Refresh Connections",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "flink-sql-workbench.testConnection",
+        "title": "Test Connection",
+        "icon": "$(plug)"
       }
     ],
     "views": {
       "explorer": [
         {
+          "id": "flinkSqlConnections",
+          "name": "Flink Gateway Connections",
+          "icon": "$(organization)"
+        },
+        {
           "id": "flinkSqlSessions",
           "name": "Flink SQL Session",
-          "when": "workspaceHasFlinkSqlFiles"
+          "icon": "$(terminal)"
         },
         {
           "id": "flinkSqlCatalog",
           "name": "Flink SQL Catalog",
-          "when": "workspaceHasFlinkSqlFiles",
           "icon": "$(database)"
         },
         {
           "id": "flinkSqlJobs",
           "name": "Flink SQL Jobs",
-          "when": "workspaceHasFlinkSqlFiles",
           "icon": "$(play)"
         }
       ]
     },
     "viewsWelcome": [
       {
+        "view": "flinkSqlConnections",
+        "contents": "No Flink Gateway connections configured.\n\nCreate connections with type **flink-gateway** in the Credential Manager.\n\n[Open Credential Manager](command:flink-sql-workbench.openCredentialManager)\n[Refresh Connections](command:flink-sql-workbench.refreshConnections)"
+      },
+      {
         "view": "flinkSqlSessions",
-        "contents": "No Flink SQL Gateway connection.\n[Connect to Gateway](command:flink-sql-workbench.connectToGateway)\nTo learn more about Flink SQL Gateway [read our docs](https://nightlies.apache.org/flink/flink-docs-release-1.17/docs/dev/table/sql-gateway/overview/).",
+        "contents": "No Flink SQL Gateway connection selected.\n[Select Connection](command:flink-sql-workbench.selectConnection)\nTo learn more about Flink SQL Gateway [read our docs](https://nightlies.apache.org/flink/flink-docs-release-1.17/docs/dev/table/sql-gateway/overview/).",
         "when": "!flinkGatewayConnected"
       },
       {
@@ -170,12 +199,12 @@
       },
       {
         "view": "flinkSqlCatalog",
-        "contents": "No Flink SQL Gateway connection.\n[Connect to Gateway](command:flink-sql-workbench.connectToGateway)",
+        "contents": "No Flink SQL Gateway connection selected.\n[Select Connection](command:flink-sql-workbench.selectConnection)",
         "when": "!flinkGatewayConnected"
       },
       {
         "view": "flinkSqlJobs",
-        "contents": "No Flink SQL Gateway connection.\n[Connect to Gateway](command:flink-sql-workbench.connectToGateway)",
+        "contents": "No Flink SQL Gateway connection selected.\n[Select Connection](command:flink-sql-workbench.selectConnection)",
         "when": "!flinkGatewayConnected"
       }
     ],
@@ -203,9 +232,25 @@
         },
         {
           "command": "flink-sql-workbench.testNewConnection"
+        },
+        {
+          "command": "flink-sql-workbench.openCredentialManager"
+        },
+        {
+          "command": "flink-sql-workbench.refreshConnections"
         }
       ],
       "view/title": [
+        {
+          "command": "flink-sql-workbench.refreshConnections",
+          "when": "view == flinkSqlConnections",
+          "group": "navigation"
+        },
+        {
+          "command": "flink-sql-workbench.openCredentialManager",
+          "when": "view == flinkSqlConnections",
+          "group": "navigation"
+        },
         {
           "command": "flink-sql-workbench.refreshSessions",
           "when": "view == flinkSqlSessions",
@@ -244,6 +289,11 @@
           "group": "inline"
         },
         {
+          "command": "flink-sql-workbench.testConnection",
+          "when": "view == flinkSqlConnections && viewItem == connection",
+          "group": "inline"
+        },
+        {
           "command": "flink-sql-workbench.setCatalog",
           "when": "view == flinkSqlCatalog && viewItem == catalog"
         },
@@ -278,10 +328,10 @@
     "configuration": {
       "title": "Flink SQL Workbench",
       "properties": {
-        "flinkSqlWorkbench.gateway.url": {
+        "flinkSqlWorkbench.gateway.connectionId": {
           "type": "string",
-          "default": "http://localhost:8083",
-          "description": "Full URL to Flink SQL Gateway (e.g., http://localhost:8083 or https://flink.example.com:8083)"
+          "default": "",
+          "description": "Connection ID from Credential Manager to use for Flink Gateway authentication and URL"
         },
         "flinkSqlWorkbench.gateway.useProxy": {
           "type": "boolean",
@@ -297,21 +347,6 @@
           ],
           "default": "auto",
           "description": "Flink Gateway API version to use (auto-detect by default)"
-        },
-        "flinkSqlWorkbench.gateway.authentication.username": {
-          "type": "string",
-          "default": "",
-          "description": "Username for basic authentication (optional)"
-        },
-        "flinkSqlWorkbench.gateway.authentication.password": {
-          "type": "string",
-          "default": "",
-          "description": "Password for basic authentication (optional)"
-        },
-        "flinkSqlWorkbench.gateway.authentication.apiToken": {
-          "type": "string",
-          "default": "",
-          "description": "Bearer token for API authentication (optional)"
         },
         "flinkSqlWorkbench.gateway.sessionName": {
           "type": "string",

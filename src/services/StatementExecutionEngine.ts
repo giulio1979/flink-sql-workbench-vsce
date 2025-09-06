@@ -155,9 +155,9 @@ export class StatementExecutionEngine {
             const val2 = row2[key];
             
             // Handle null/undefined comparison
-            if (val1 === null && val2 === null) return true;
-            if (val1 === undefined && val2 === undefined) return true;
-            if (val1 === null || val1 === undefined || val2 === null || val2 === undefined) return false;
+            if (val1 === null && val2 === null) {return true;}
+            if (val1 === undefined && val2 === undefined) {return true;}
+            if (val1 === null || val1 === undefined || val2 === null || val2 === undefined) {return false;}
             
             // For primitive values, use strict equality
             if (typeof val1 !== 'object' && typeof val2 !== 'object') {
@@ -279,7 +279,7 @@ export class StatementExecutionEngine {
                         let deleteCount = 0;
                         
                         for (const row of newRows) {
-                            if (this.cancelled) break;
+                            if (this.cancelled) {break;}
                             
                             if (row.fields && Array.isArray(row.fields)) {
                                 // Convert fields to row object
