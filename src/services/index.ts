@@ -8,6 +8,7 @@ export { StatementExecutionEngine } from './StatementExecutionEngine';
 export { StatementManager } from './StatementManager';
 export { FlinkGatewayServiceAdapter } from './FlinkGatewayServiceAdapter';
 export { CredentialService } from './CredentialService';
+export { SecretProcessor, SecretProcessingError } from './SecretProcessor';
 
 // Export types with specific names to avoid conflicts
 export type { 

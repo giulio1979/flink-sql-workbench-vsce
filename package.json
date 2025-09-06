@@ -156,6 +156,11 @@
         "command": "flink-sql-workbench.testConnection",
         "title": "Test Connection",
         "icon": "$(plug)"
+      },
+      {
+        "command": "flink-sql-workbench.previewSecretProcessing",
+        "title": "Preview Secret Processing",
+        "icon": "$(eye)"
       }
     ],
     "views": {
@@ -456,6 +461,16 @@
           "type": "number",
           "default": 10000,
           "description": "Jobs auto-refresh interval in milliseconds"
+        },
+        "flinkSqlWorkbench.secrets.enableSecretProcessing": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable processing of secret references in SQL statements for local development"
+        },
+        "flinkSqlWorkbench.secrets.validateBeforeExecution": {
+          "type": "boolean", 
+          "default": true,
+          "description": "Validate that all environment variables are available before executing SQL with secret references"
         }
       }
     }

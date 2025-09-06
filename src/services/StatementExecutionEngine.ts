@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { SessionManager } from './SessionManager';
 import { FlinkApiService } from './FlinkApiService';
+import { SecretProcessor, SecretProcessingError } from './SecretProcessor';
 import { createModuleLogger } from './logger';
 
 const log = createModuleLogger('StatementExecutionEngine');
@@ -192,6 +193,46 @@ export class StatementExecutionEngine {
         });
 
         try {
+            // Process secret references in the statement if enabled
+            let processedStatement = statement;
+            if (SecretProcessor.isEnabled()) {
+                try {
+                    // Validate first if validation is enabled
+                    if (SecretProcessor.isValidationEnabled()) {
+                        const validation = SecretProcessor.validateStatement(statement);
+                        if (!validation.isValid) {
+                            const missingVars = validation.missingEnvVars.join(', ');
+                            const errorMsg = `Missing environment variables for secret references: ${missingVars}`;
+                            log.error(`Validation failed for statement ${this.statementId}: ${errorMsg}`);
+                            this.updateState({
+                                statementExecutionState: 'STOPPED',
+                                resultType: 'ERROR',
+                                resultKind: 'ERROR'
+                            });
+                            throw new Error(errorMsg);
+                        }
+                        log.debug(`Secret validation passed for statement ${this.statementId}: ${validation.secretReferences.length} reference(s)`);
+                    }
+
+                    // Process the statement
+                    processedStatement = SecretProcessor.processStatement(statement);
+                    if (processedStatement !== statement) {
+                        log.info(`Processed secret references in statement ${this.statementId}`);
+                    }
+                } catch (error: any) {
+                    if (error instanceof SecretProcessingError) {
+                        log.error(`Secret processing failed for statement ${this.statementId}: ${error.message}`);
+                        this.updateState({
+                            statementExecutionState: 'STOPPED',
+                            resultType: 'ERROR',
+                            resultKind: 'ERROR'
+                        });
+                        throw new Error(`Secret processing failed: ${error.message}`);
+                    }
+                    throw error;
+                }
+            }
+
             // Get session from session manager
             const session = await this.sessionManager.getSession();
             
@@ -202,9 +243,9 @@ export class StatementExecutionEngine {
                 await this.sessionManager.createSession();
             }
 
-            // Submit statement
+            // Submit statement (use processed statement with resolved secrets)
             log.info(`Submitting statement ${this.statementId}...`);
-            const operationResponse = await this.flinkApi.submitStatement(session.sessionHandle, statement);
+            const operationResponse = await this.flinkApi.submitStatement(session.sessionHandle, processedStatement);
             this.operationHandle = operationResponse.operationHandle;
             log.info(`Operation submitted with handle: ${this.operationHandle}`);
 

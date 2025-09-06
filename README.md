@@ -34,6 +34,7 @@ A comprehensive VS Code extension for editing, executing, and managing Apache Fl
 - **Error Handling**: Rich error reporting with context and suggestions
 - **Keyboard Shortcuts**: Efficient shortcuts for common operations
 - **Command Palette**: Full command palette integration
+- **Secret Processing**: Automatic replacement of Kubernetes secret references with environment variables for local development
 
 ## 📥 Installation
 
@@ -300,6 +301,17 @@ Please migrate to using the Credential Manager extension for secure credential s
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `flinkSqlWorkbench.ui.theme` | string | `auto` | Panel theme (auto, dark, light) |
+
+### Secret Processing Settings
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `flinkSqlWorkbench.secrets.enableSecretProcessing` | boolean | `true` | Enable processing of secret references for local development |
+| `flinkSqlWorkbench.secrets.validateBeforeExecution` | boolean | `true` | Validate environment variables before executing SQL with secrets |
+
+The extension can automatically process Kubernetes secret references in your SQL statements during local development. Secret references like `${secrets://namespace:secretname/key}` are replaced with corresponding environment variable values.
+
+For detailed information, see [SECRET_PROCESSING.md](SECRET_PROCESSING.md).
 
 ## 🔧 Advanced Usage
 

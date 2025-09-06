@@ -883,6 +883,188 @@ function registerCommands(context: vscode.ExtensionContext): void {
         })
     );
 
+    // Secret processing preview command
+    context.subscriptions.push(
+        vscode.commands.registerCommand('flink-sql-workbench.previewSecretProcessing', async () => {
+            try {
+                const editor = vscode.window.activeTextEditor;
+                if (!editor) {
+                    vscode.window.showWarningMessage('No active editor found. Please open a .flink.sql file.');
+                    return;
+                }
+
+                // Get the current selection or entire document
+                const selection = editor.selection;
+                let sqlText: string;
+                
+                if (selection && !selection.isEmpty) {
+                    sqlText = editor.document.getText(selection);
+                } else {
+                    sqlText = editor.document.getText();
+                }
+
+                if (!sqlText.trim()) {
+                    vscode.window.showWarningMessage('No SQL content found to preview.');
+                    return;
+                }
+
+                // Import SecretProcessor here to avoid circular dependencies
+                const { SecretProcessor } = await import('./services/index.js');
+
+                // Check if secret processing is enabled
+                if (!SecretProcessor.isEnabled()) {
+                    vscode.window.showInformationMessage('Secret processing is disabled. Enable it in settings to use this feature.');
+                    return;
+                }
+
+                // Extract secret references
+                const references = SecretProcessor.extractSecretReferences(sqlText);
+                
+                if (references.length === 0) {
+                    vscode.window.showInformationMessage('No secret references found in the SQL content.');
+                    return;
+                }
+
+                // Validate that environment variables exist
+                const validation = SecretProcessor.validateStatement(sqlText);
+                
+                let processedSql: string;
+                try {
+                    processedSql = SecretProcessor.processStatement(sqlText);
+                } catch (error: any) {
+                    // Show error but still show the preview panel with validation info
+                    processedSql = `-- ERROR: ${error.message}\n-- Could not process the following SQL:\n\n${sqlText}`;
+                }
+
+                // Create and show preview panel
+                const panel = vscode.window.createWebviewPanel(
+                    'secretPreview',
+                    'Secret Processing Preview',
+                    vscode.ViewColumn.Beside,
+                    {
+                        enableScripts: true
+                    }
+                );
+
+                const referencesHtml = references.map((ref: any) => {
+                    const envValue = process.env[ref.key];
+                    const status = envValue ? '✅' : '❌';
+                    const valuePreview = envValue ? `${envValue.substring(0, 6)}...` : 'Not found';
+                    
+                    return `
+                        <tr>
+                            <td>${status}</td>
+                            <td><code>${escapeHtml(ref.fullMatch)}</code></td>
+                            <td><code>${escapeHtml(ref.key)}</code></td>
+                            <td><code>${escapeHtml(valuePreview)}</code></td>
+                        </tr>
+                    `;
+                }).join('');
+
+                panel.webview.html = `
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <title>Secret Processing Preview</title>
+                    <style>
+                        body { 
+                            font-family: var(--vscode-font-family); 
+                            padding: 20px; 
+                            max-width: 1200px;
+                        }
+                        .section { margin-bottom: 30px; }
+                        .section h3 { 
+                            color: var(--vscode-foreground); 
+                            border-bottom: 1px solid var(--vscode-panel-border);
+                            padding-bottom: 8px;
+                        }
+                        table { 
+                            width: 100%; 
+                            border-collapse: collapse; 
+                            margin: 10px 0;
+                        }
+                        th, td { 
+                            border: 1px solid var(--vscode-panel-border); 
+                            padding: 8px; 
+                            text-align: left; 
+                        }
+                        th { 
+                            background-color: var(--vscode-editor-background); 
+                            font-weight: bold;
+                        }
+                        pre { 
+                            background-color: var(--vscode-editor-background); 
+                            padding: 15px; 
+                            border-radius: 4px;
+                            border: 1px solid var(--vscode-panel-border);
+                            overflow-x: auto;
+                            white-space: pre-wrap;
+                        }
+                        .success { color: var(--vscode-terminal-ansiGreen); }
+                        .error { color: var(--vscode-terminal-ansiRed); }
+                        .warning { color: var(--vscode-terminal-ansiYellow); }
+                        code { 
+                            background-color: var(--vscode-editor-background);
+                            padding: 2px 4px;
+                            border-radius: 2px;
+                        }
+                    </style>
+                </head>
+                <body>
+                    <h2>Secret Processing Preview</h2>
+                    
+                    <div class="section">
+                        <h3>Validation Status</h3>
+                        ${validation.isValid ? 
+                            `<p class="success">✅ All environment variables are available</p>` :
+                            `<p class="error">❌ Missing environment variables: ${validation.missingEnvVars.join(', ')}</p>`
+                        }
+                    </div>
+
+                    <div class="section">
+                        <h3>Secret References Found (${references.length})</h3>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Status</th>
+                                    <th>Secret Reference</th>
+                                    <th>Environment Variable</th>
+                                    <th>Value Preview</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${referencesHtml}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="section">
+                        <h3>Original SQL</h3>
+                        <pre><code>${escapeHtml(sqlText)}</code></pre>
+                    </div>
+
+                    <div class="section">
+                        <h3>Processed SQL (after secret replacement)</h3>
+                        <pre><code>${escapeHtml(processedSql)}</code></pre>
+                    </div>
+
+                    <div class="section">
+                        <h3>Settings</h3>
+                        <p>Secret Processing Enabled: <strong>${SecretProcessor.isEnabled() ? 'Yes' : 'No'}</strong></p>
+                        <p>Validation Before Execution: <strong>${SecretProcessor.isValidationEnabled() ? 'Yes' : 'No'}</strong></p>
+                        <p><em>Configure these settings in VS Code preferences under "Flink SQL Workbench > Secrets"</em></p>
+                    </div>
+                </body>
+                </html>`;
+
+            } catch (error: any) {
+                logger.error(`Error previewing secret processing: ${error.message}`);
+                vscode.window.showErrorMessage(`Error previewing secret processing: ${error.message}`);
+            }
+        })
+    );
+
     logger.info('Commands registered successfully');
 }
 
