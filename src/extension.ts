@@ -7,7 +7,8 @@ import {
     CredentialService,
     logger,
     NewSessionInfo,
-    GlobalStatementEvent
+    GlobalStatementEvent,
+    SecretProcessor
 } from './services';
 import { QueryResult } from './types';
 import { DEFAULT_FLINK_GATEWAY_URL } from './config';
@@ -909,7 +910,7 @@ function registerCommands(context: vscode.ExtensionContext): void {
                 }
 
                 // Import SecretProcessor here to avoid circular dependencies
-                const { SecretProcessor } = await import('./services/index.js');
+                // const { SecretProcessor } = await import('./services/SecretProcessor.js');
 
                 // Check if secret processing is enabled
                 if (!SecretProcessor.isEnabled()) {
