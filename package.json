@@ -298,20 +298,10 @@
           "default": "auto",
           "description": "Flink Gateway API version to use (auto-detect by default)"
         },
-        "flinkSqlWorkbench.gateway.authentication.username": {
+        "flinkSqlWorkbench.gateway.connectionId": {
           "type": "string",
           "default": "",
-          "description": "Username for basic authentication (optional)"
-        },
-        "flinkSqlWorkbench.gateway.authentication.password": {
-          "type": "string",
-          "default": "",
-          "description": "Password for basic authentication (optional)"
-        },
-        "flinkSqlWorkbench.gateway.authentication.apiToken": {
-          "type": "string",
-          "default": "",
-          "description": "Bearer token for API authentication (optional)"
+          "description": "Connection ID from credential manager (takes precedence over authentication settings)"
         },
         "flinkSqlWorkbench.gateway.sessionName": {
           "type": "string",

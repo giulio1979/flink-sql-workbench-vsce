@@ -4,6 +4,7 @@ import {
     StatementManager, 
     SessionManager,
     FlinkGatewayServiceAdapter,
+    CredentialManagerService,
     logger,
     NewSessionInfo,
     GlobalStatementEvent
@@ -61,6 +62,9 @@ export function activate(context: vscode.ExtensionContext) {
     logger.info('Activating Flink SQL Workbench extension with new robust services...');
 
     try {
+        // Initialize credential manager service
+        CredentialManagerService.initialize(context);
+        
         // Initialize services
         initializeServices();
         
@@ -90,13 +94,17 @@ function initializeServices(): void {
     const url = gatewayConfig.get<string>('url', 'http://localhost:8083');
     flinkApi = new FlinkApiService(url);
     
-    // Set credentials if provided
-    const username = gatewayConfig.get<string>('authentication.username');
-    const password = gatewayConfig.get<string>('authentication.password');
-    const apiToken = gatewayConfig.get<string>('authentication.apiToken');
+    // Check for credential manager connection first
+    const connectionId = gatewayConfig.get<string>('connectionId');
     
-    if (username || password || apiToken) {
-        flinkApi.setCredentials(username, password, apiToken);
+    if (connectionId) {
+        logger.info(`Using credential manager connection: ${connectionId}`);
+        // Credentials will be loaded asynchronously when needed
+        // We can't await here since this is not an async function
+        loadCredentialsFromManager(connectionId);
+    } else {
+        // No credential manager connection configured
+        logger.warn('No credential manager connection configured. Please set flinkSqlWorkbench.gateway.connectionId to use credential manager.');
     }
     
     // Initialize StatementManager and SessionManager
@@ -107,6 +115,33 @@ function initializeServices(): void {
     gatewayAdapter = new FlinkGatewayServiceAdapter(statementManager, sessionManager, flinkApi);
     
     logger.info('Services initialized successfully');
+}
+
+async function loadCredentialsFromManager(connectionId: string): Promise<void> {
+    try {
+        logger.info(`Loading credentials from credential manager for connection: ${connectionId}`);
+        
+        const connection = await CredentialManagerService.getConnectionById(connectionId);
+        if (!connection) {
+            logger.warn(`Connection ${connectionId} not found in credential manager`);
+            return;
+        }
+        
+        // Update the gateway URL from the connection
+        if (connection.url) {
+            logger.info(`Updating gateway URL from connection: ${connection.url}`);
+            flinkApi.setBaseUrl(connection.url);
+        }
+        
+        // Set credentials from the connection
+        const credentials = CredentialManagerService.connectionToCredentials(connection);
+        flinkApi.setCredentials(credentials.username, credentials.password, credentials.apiToken);
+        
+        logger.info('Credentials loaded successfully from credential manager');
+        
+    } catch (error: any) {
+        logger.error(`Failed to load credentials from credential manager: ${error.message}`);
+    }
 }
 
 function registerProviders(context: vscode.ExtensionContext): void {
@@ -701,15 +736,18 @@ function setupEventListeners(): void {
             // Reinitialize services with new configuration
             const gatewayConfig = vscode.workspace.getConfiguration('flinkSqlWorkbench.gateway');
             const url = gatewayConfig.get<string>('url', 'http://localhost:8083');
+            const connectionId = gatewayConfig.get<string>('connectionId');
             
             flinkApi.setBaseUrl(url);
             
-            // Update credentials
-            const username = gatewayConfig.get<string>('authentication.username');
-            const password = gatewayConfig.get<string>('authentication.password');
-            const apiToken = gatewayConfig.get<string>('authentication.apiToken');
-            
-            flinkApi.setCredentials(username, password, apiToken);
+            if (connectionId) {
+                // Use credential manager
+                logger.info(`Configuration changed: using credential manager connection ${connectionId}`);
+                loadCredentialsFromManager(connectionId);
+            } else {
+                // No credential manager connection configured
+                logger.warn('Configuration changed: No credential manager connection configured. Please set flinkSqlWorkbench.gateway.connectionId.');
+            }
         }
     });
 

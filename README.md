@@ -52,36 +52,41 @@ A comprehensive VS Code extension for editing, executing, and managing Apache Fl
 ## ⚙️ Configuration
 
 ### Quick Setup
-1. Open VS Code settings (Ctrl+,)
-2. Search for "Flink SQL Workbench"
-3. Configure your Flink SQL Gateway URL: `http://localhost:8083`
+1. **Recommended**: Use a credential manager extension to store your connections securely
+2. Set up your connection in the credential manager with type `flink-gateway`
+3. Configure the connection ID in VS Code settings: `flinkSqlWorkbench.gateway.connectionId`
 
 ### Gateway Configuration
 
-#### Basic Connection
+#### Using Credential Manager (Required)
+All authentication is now handled through a credential manager extension:
+
+```json
+{
+  "flinkSqlWorkbench.gateway.connectionId": "your-connection-id"
+}
+```
+
+Your credential manager should have a connection configured like:
+```json
+{
+  "id": "your-connection-id",
+  "name": "Production Flink Gateway",
+  "type": "flink-gateway", 
+  "url": "https://flink-gateway.example.com:8083",
+  "authType": "basic",
+  "username": "your-username"
+}
+```
+
+#### Basic Connection (No Authentication)
+For development environments without authentication:
 ```json
 {
   "flinkSqlWorkbench.gateway.url": "http://localhost:8083",
   "flinkSqlWorkbench.gateway.apiVersion": "auto",
   "flinkSqlWorkbench.gateway.timeout": 30000
 }
-```
-
-#### With Authentication
-```json
-{
-  "flinkSqlWorkbench.gateway.authentication.username": "admin",
-  "flinkSqlWorkbench.gateway.authentication.password": "password"
-}
-```
-
-#### Using Bearer Token
-```json
-{
-  "flinkSqlWorkbench.gateway.authentication.apiToken": "your-api-token"
-}
-```
-
 ### Session Configuration
 
 #### Default Session Properties
@@ -210,19 +215,12 @@ A comprehensive VS Code extension for editing, executing, and managing Apache Fl
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `flinkSqlWorkbench.gateway.url` | string | `http://localhost:8083` | Flink SQL Gateway URL |
+| `flinkSqlWorkbench.gateway.connectionId` | string | `""` | **Required**: Connection ID from credential manager |
+| `flinkSqlWorkbench.gateway.url` | string | `http://localhost:8083` | Flink SQL Gateway URL (overridden by connection) |
 | `flinkSqlWorkbench.gateway.useProxy` | boolean | `false` | Use proxy for CORS issues |
 | `flinkSqlWorkbench.gateway.apiVersion` | string | `auto` | API version (v1, v2, auto) |
 | `flinkSqlWorkbench.gateway.timeout` | number | `30000` | Request timeout (ms) |
 | `flinkSqlWorkbench.gateway.maxRetries` | number | `3` | Max retry attempts |
-
-### Authentication Settings
-
-| Setting | Type | Default | Description |
-|---------|------|---------|-------------|
-| `flinkSqlWorkbench.gateway.authentication.username` | string | `""` | Basic auth username |
-| `flinkSqlWorkbench.gateway.authentication.password` | string | `""` | Basic auth password |
-| `flinkSqlWorkbench.gateway.authentication.apiToken` | string | `""` | Bearer token |
 
 ### Session Settings
 
