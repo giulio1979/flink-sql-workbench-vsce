@@ -2,7 +2,7 @@
   "name": "flink-sql-workbench",
   "displayName": "Flink SQL Workbench",
   "description": "VS Code extension for editing and executing Flink SQL with gateway session management (Avichay Marciano, Iulius Hutuleac)",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -145,7 +145,8 @@
       },
       {
         "command": "flink-sql-workbench.selectConnection",
-        "title": "Select Connection"
+        "title": "Select Connection",
+        "icon": "$(arrow-swap)"
       },
       {
         "command": "flink-sql-workbench.refreshConnections",
@@ -242,19 +243,27 @@
           "command": "flink-sql-workbench.openCredentialManager"
         },
         {
+          "command": "flink-sql-workbench.selectConnection"
+        },
+        {
           "command": "flink-sql-workbench.refreshConnections"
         }
       ],
       "view/title": [
         {
+          "command": "flink-sql-workbench.selectConnection",
+          "when": "view == flinkSqlConnections",
+          "group": "navigation@1"
+        },
+        {
           "command": "flink-sql-workbench.refreshConnections",
           "when": "view == flinkSqlConnections",
-          "group": "navigation"
+          "group": "navigation@2"
         },
         {
           "command": "flink-sql-workbench.openCredentialManager",
           "when": "view == flinkSqlConnections",
-          "group": "navigation"
+          "group": "navigation@3"
         },
         {
           "command": "flink-sql-workbench.refreshSessions",
@@ -262,14 +271,29 @@
           "group": "navigation"
         },
         {
+          "command": "flink-sql-workbench.selectConnection",
+          "when": "view == flinkSqlSessions && !flinkGatewayConnected",
+          "group": "navigation@0"
+        },
+        {
           "command": "flink-sql-workbench.createSession",
           "when": "view == flinkSqlSessions && flinkGatewayConnected",
           "group": "navigation"
         },
         {
+          "command": "flink-sql-workbench.selectConnection",
+          "when": "view == flinkSqlCatalog && !flinkGatewayConnected",
+          "group": "navigation@0"
+        },
+        {
           "command": "flink-sql-workbench.refreshCatalog",
           "when": "view == flinkSqlCatalog",
           "group": "navigation"
+        },
+        {
+          "command": "flink-sql-workbench.selectConnection",
+          "when": "view == flinkSqlJobs && !flinkGatewayConnected",
+          "group": "navigation@0"
         },
         {
           "command": "flink-sql-workbench.refreshJobs",
