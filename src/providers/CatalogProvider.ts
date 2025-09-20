@@ -153,6 +153,9 @@ export class CatalogProvider implements vscode.TreeDataProvider<CatalogItem> {
     }
 
     private extractFirstValue(row: any): string {
+        // Debug the row structure to understand what we're dealing with
+        console.log('Extract first value from row:', JSON.stringify(row));
+        
         if (Array.isArray(row)) {
             return row[0]; // First column
         } else if (row && typeof row === 'object' && row.fields && Array.isArray(row.fields)) {
@@ -161,9 +164,28 @@ export class CatalogProvider implements vscode.TreeDataProvider<CatalogItem> {
             // Object format - find first value
             const keys = Object.keys(row);
             if (keys.length > 0) {
+                // For catalog, database, and table names, look for key patterns
+                const nameKeys = keys.filter(k => 
+                    k.toLowerCase().includes('name') || 
+                    k.toLowerCase().includes('database') ||
+                    k.toLowerCase().includes('catalog') ||
+                    k.toLowerCase().includes('table')
+                );
+                
+                if (nameKeys.length > 0) {
+                    // Prefer name keys
+                    return row[nameKeys[0]];
+                }
+                
+                // Otherwise return first property value
                 return row[keys[0]];
             }
         }
+        // If row is a primitive value, return it directly
+        if (typeof row === 'string' || typeof row === 'number') {
+            return String(row);
+        }
+        
         return '';
     }
 

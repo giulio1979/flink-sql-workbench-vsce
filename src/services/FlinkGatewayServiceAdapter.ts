@@ -13,14 +13,19 @@ import * as vscode from 'vscode';
 import { StatementManager } from './StatementManager';
 import { SessionManager } from './SessionManager';
 import { FlinkApiService } from './FlinkApiService';
-import { logger } from './logger';
+import { logger, createModuleLogger } from './logger';
 import { QueryResult, SessionInfo } from '../types';
+import { SimpleConnection } from './SimpleConnection';
+import { GlobalSessionState } from './GlobalSessionState';
+
+const log = createModuleLogger('FlinkGatewayServiceAdapter');
 
 export class FlinkGatewayServiceAdapter {
     private statementManager: StatementManager;
     private sessionManager: SessionManager;
     private flinkApi: FlinkApiService;
     private outputChannel: vscode.OutputChannel;
+    private globalSessionState: GlobalSessionState;
 
     // Properties expected by legacy interface
     public config: any = {};
@@ -37,9 +42,34 @@ export class FlinkGatewayServiceAdapter {
         this.sessionManager = sessionManager;
         this.flinkApi = flinkApi;
         this.outputChannel = vscode.window.createOutputChannel('Flink Gateway Adapter');
+        this.globalSessionState = GlobalSessionState.getInstance();
 
-        // Listen to session updates
+        // Listen to session updates from SessionManager
         this.sessionManager.addListener((sessionInfo) => {
+            if (sessionInfo) {
+                this.sessionHandle = sessionInfo.sessionHandle;
+                this.sessionName = sessionInfo.sessionName;
+                this.connected = true;
+                
+                // Update global state
+                const typedSessionInfo: SessionInfo = {
+                    sessionHandle: sessionInfo.sessionHandle,
+                    sessionName: sessionInfo.sessionName,
+                    created: sessionInfo.created,
+                    properties: sessionInfo.properties,
+                    isActive: true
+                };
+                this.globalSessionState.setActiveSession(typedSessionInfo);
+            } else {
+                this.sessionHandle = null;
+                this.sessionName = '';
+                this.connected = false;
+                this.globalSessionState.clearActiveSession();
+            }
+        });
+        
+        // Listen to global session state changes
+        this.globalSessionState.onSessionChanged((sessionInfo) => {
             if (sessionInfo) {
                 this.sessionHandle = sessionInfo.sessionHandle;
                 this.sessionName = sessionInfo.sessionName;
@@ -50,13 +80,117 @@ export class FlinkGatewayServiceAdapter {
                 this.connected = false;
             }
         });
+        
+        // Listen to connection changes from SimpleConnection
+        SimpleConnection.onConnectionChanged(() => {
+            // Update the API service when the connection changes
+            if (SimpleConnection.isConnected()) {
+                const apiService = SimpleConnection.getApiService();
+                if (apiService) {
+                    this.flinkApi = apiService;
+                    this.sessionManager.setFlinkApi(apiService);
+                    this.statementManager.setFlinkApi(apiService);
+                    this.connected = true;
+                    
+                    // Add a small delay to ensure the API service is fully set up
+                    setTimeout(() => {
+                        // Create a session immediately after connection is established
+                        this.createNewSession().then(() => {
+                            log.info('Session created automatically after connection changed');
+                            // Refresh views after successful session creation
+                            vscode.commands.executeCommand('flinkSqlWorkbench.refreshSessions');
+                            vscode.commands.executeCommand('workbench.actions.refreshTimeline');
+                        }).catch(err => {
+                            log.error('Failed to create session after connection changed:', err);
+                            // Try one more time after a short delay
+                            setTimeout(() => {
+                                this.createNewSession().catch(error => {
+                                    log.error('Second attempt to create session failed:', error);
+                                });
+                            }, 1000);
+                        });
+                    }, 500);
+                }
+            } else {
+                this.connected = false;
+                this.sessionHandle = null;
+                this.sessionName = '';
+            }
+        });
     }
 
     /**
      * Check if connected to gateway
      */
     isConnected(): boolean {
+        // First check SimpleConnection as the source of truth
+        if (SimpleConnection.isConnected()) {
+            this.connected = true;
+            
+            // Check if we have an active session in the global state
+            const activeSession = this.globalSessionState.getActiveSession();
+            if (activeSession) {
+                this.sessionHandle = activeSession.sessionHandle;
+                this.sessionName = activeSession.sessionName;
+                return true;
+            }
+            
+            // Ensure we have a valid session when connected
+            if (!this.sessionHandle) {
+                // Trigger session creation asynchronously
+                this.validateAndCreateSession();
+            }
+            
+            return true;
+        }
+        
+        // Fall back to own connection status
         return this.connected && this.sessionHandle !== null;
+    }
+    
+    /**
+     * Validate current session and create one if needed
+     * This helps maintain session state when switching connections
+     */
+    private async validateAndCreateSession(): Promise<void> {
+        try {
+            // First check if there's an active session in the global state
+            const activeSession = this.globalSessionState.getActiveSession();
+            if (activeSession) {
+                // Verify it's still valid
+                try {
+                    const isValid = await this.globalSessionState.validateActiveSession(this.sessionManager);
+                    if (isValid) {
+                        log.info('Active session in global state is valid');
+                        return;
+                    }
+                } catch (e) {
+                    log.warn('Error validating global session', e);
+                }
+            }
+            
+            if (!this.sessionHandle) {
+                log.info('No session handle found, creating new session');
+                await this.createNewSession();
+            } else {
+                // Verify session is still valid
+                try {
+                    const sessionInfo = await this.sessionManager.validateSession();
+                    if (!sessionInfo) {
+                        log.info('Session invalid, creating new session');
+                        await this.createNewSession();
+                    } else {
+                        // Update the global session state
+                        await this.globalSessionState.setActiveSessionFromManager(this.sessionManager);
+                    }
+                } catch (e) {
+                    log.warn('Error validating session, creating new one', e);
+                    await this.createNewSession();
+                }
+            }
+        } catch (error) {
+            log.error('Failed to validate and create session:', error);
+        }
     }
 
     /**
@@ -64,11 +198,23 @@ export class FlinkGatewayServiceAdapter {
      */
     async executeQuery(sql: string): Promise<QueryResult | null> {
         try {
+            // Add debug logging to see what SQL is being executed
+            log.info(`Executing SQL query: ${sql.length > 100 ? sql.substring(0, 100) + '...' : sql}`);
+            
             const executionResult = await this.statementManager.executeSQL(sql);
+            
+            // Log the result details
+            log.info(`Query execution result: status=${executionResult.status}, columns=${executionResult.state.columns.length}, results=${executionResult.state.results.length}`);
+            
+            // Check for streaming query
+            const isStreamingQuery = sql.toLowerCase().includes('show') && 
+                                    (sql.toLowerCase().includes('databases') || 
+                                     sql.toLowerCase().includes('tables') || 
+                                     sql.toLowerCase().includes('catalogs'));
             
             if (executionResult.status === 'COMPLETED') {
                 // Convert ExecutionResult to QueryResult format
-                return {
+                const queryResult: QueryResult = {
                     columns: executionResult.state.columns.map(col => ({
                         name: col.name,
                         logicalType: {
@@ -78,15 +224,26 @@ export class FlinkGatewayServiceAdapter {
                     })),
                     results: executionResult.state.results,
                     executionTime: executionResult.state.lastUpdateTime || 0,
-                    error: executionResult.error
+                    error: executionResult.error,
+                    isStreaming: isStreamingQuery
                 };
+                
+                // Debug log to check the results
+                if (queryResult.results && queryResult.results.length > 0) {
+                    log.info(`Sample result: ${JSON.stringify(queryResult.results[0])}`);
+                } else {
+                    log.info('Query returned no results');
+                }
+                
+                return queryResult;
             } else {
                 // Return error result
                 return {
                     columns: [],
                     results: [],
                     executionTime: 0,
-                    error: executionResult.error || `Statement failed with status: ${executionResult.status}`
+                    error: executionResult.error || `Statement failed with status: ${executionResult.status}`,
+                    isStreaming: false
                 };
             }
         } catch (error: any) {
@@ -95,7 +252,8 @@ export class FlinkGatewayServiceAdapter {
                 columns: [],
                 results: [],
                 executionTime: 0,
-                error: error.message
+                error: error.message,
+                isStreaming: false
             };
         }
     }
@@ -144,7 +302,8 @@ export class FlinkGatewayServiceAdapter {
         return {
             sessionHandle: this.sessionHandle,
             sessionName: this.sessionName,
-            created: new Date() // We don't track creation time in new services
+            created: new Date(), // We don't track creation time in new services
+            isActive: true
         };
     }
 
@@ -152,7 +311,32 @@ export class FlinkGatewayServiceAdapter {
      * Create new session
      */
     async createNewSession(): Promise<boolean> {
+        // Ensure we have an API service before attempting to create a session
+        if (!this.flinkApi || !SimpleConnection.isConnected()) {
+            const apiService = SimpleConnection.getApiService();
+            if (!apiService) {
+                log.warn('Cannot create session: No active API service available');
+                return false;
+            }
+            this.flinkApi = apiService;
+            this.sessionManager.setFlinkApi(apiService);
+            this.statementManager.setFlinkApi(apiService);
+        }
+        
         try {
+            // First check if we already have a valid session
+            if (this.sessionHandle) {
+                try {
+                    const isValid = await this.sessionManager.validateSession();
+                    if (isValid) {
+                        log.info('Existing session is valid, reusing it');
+                        return true;
+                    }
+                } catch (e) {
+                    log.warn('Error validating existing session, will create a new one');
+                }
+            }
+            
             const sessionInfo = await this.statementManager.createSession();
             this.connected = true;
             this.sessionHandle = sessionInfo.sessionHandle;

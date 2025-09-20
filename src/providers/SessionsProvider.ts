@@ -1,52 +1,114 @@
 import * as vscode from 'vscode';
 import { FlinkGatewayServiceAdapter } from '../services/FlinkGatewayServiceAdapter';
-import { SessionInfo } from '../types';
+import { SessionInfo, BaseTreeItem } from '../types';
+import { BaseTreeDataProvider, NotificationService, VSCodeUtils, ErrorHandler } from '../utils/base';
+import { GlobalSessionState } from '../services/GlobalSessionState';
 
-export class SessionsProvider implements vscode.TreeDataProvider<SessionItem> {
-    private _onDidChangeTreeData: vscode.EventEmitter<SessionItem | undefined | null | void> = new vscode.EventEmitter<SessionItem | undefined | null | void>();
-    readonly onDidChangeTreeData: vscode.Event<SessionItem | undefined | null | void> = this._onDidChangeTreeData.event;
+interface SessionItem extends BaseTreeItem {
+    sessionHandle: string;
+    isActive: boolean;
+    created: Date;
+}
 
+export class SessionsProvider extends BaseTreeDataProvider<SessionItem> {
     private currentSession: SessionInfo | null = null;
+    private globalSessionState: GlobalSessionState;
 
     constructor(
         private readonly gatewayService: FlinkGatewayServiceAdapter,
-        private readonly context: vscode.ExtensionContext
+        context: vscode.ExtensionContext
     ) {
+        super(context);
+        
+        // Get GlobalSessionState instance
+        this.globalSessionState = GlobalSessionState.getInstance();
+        
+        // Subscribe to GlobalSessionState changes
+        this.globalSessionState.onSessionChanged(sessionInfo => {
+            this.currentSession = sessionInfo;
+            this.refresh();
+        });
+        
+        // Subscribe to SimpleConnection changes to ensure we refresh when connection changes
+        const SimpleConnection = require('../services/SimpleConnection').SimpleConnection;
+        SimpleConnection.onConnectionChanged(() => {
+            this.refresh();
+        });
+        
         this.refresh();
     }
 
-    // Dispose any resources held by this provider
-    public dispose(): void {
-        try {
-            // No long-lived disposables currently, but keep defensive cleanup
-            this._onDidChangeTreeData.dispose();
-        } catch (e) {
-            // ignore
-        }
-    }
-
-    refresh(): void {
-        this.loadCurrentSession();
-        this._onDidChangeTreeData.fire();
+    async loadData(): Promise<void> {
+        await ErrorHandler.withErrorHandling(async () => {
+            // First check if there's an active session in the global state
+            const globalSession = this.globalSessionState.getActiveSession();
+            if (globalSession) {
+                this.currentSession = globalSession;
+                
+                // Update VS Code context
+                await VSCodeUtils.setContext('flinkGatewayConnected', true);
+                await VSCodeUtils.setContext('hasActiveSession', true);
+                await VSCodeUtils.setContext('workspaceHasFlinkSqlFiles', true);
+                return;
+            }
+            
+            // Fall back to gateway service if global state has no session
+            if (this.gatewayService.isConnected()) {
+                this.currentSession = await this.gatewayService.getCurrentSession();
+                
+                // If we got a session from gateway service, update global state
+                if (this.currentSession) {
+                    this.globalSessionState.setActiveSession(this.currentSession);
+                }
+                
+                // Update VS Code context
+                await VSCodeUtils.setContext('flinkGatewayConnected', true);
+                await VSCodeUtils.setContext('hasActiveSession', !!this.currentSession);
+                await VSCodeUtils.setContext('workspaceHasFlinkSqlFiles', true);
+            } else {
+                this.currentSession = null;
+                await VSCodeUtils.setContext('flinkGatewayConnected', false);
+                await VSCodeUtils.setContext('hasActiveSession', false);
+            }
+        }, 'Loading session data', false);
     }
 
     getTreeItem(element: SessionItem): vscode.TreeItem {
-        return element;
+        const item = new vscode.TreeItem(element.label, element.collapsibleState);
+        item.id = element.id;
+        item.description = element.description;
+        item.tooltip = element.tooltip;
+        item.contextValue = element.contextValue;
+        item.iconPath = element.iconPath;
+        
+        // Add command to set this session as active when clicked
+        item.command = {
+            command: 'flink-sql-workbench.setActiveSession',
+            title: 'Set as Active Session',
+            arguments: [element]
+        };
+        
+        return item;
     }
 
     getChildren(element?: SessionItem): Thenable<SessionItem[]> {
         if (!element) {
             // Root level - return current session or empty
             if (this.currentSession) {
-                return Promise.resolve([
-                    new SessionItem(
-                        this.currentSession.sessionName,
-                        this.currentSession.sessionHandle,
-                        true, // Always active since it's the only one
-                        this.currentSession.created,
-                        vscode.TreeItemCollapsibleState.None
-                    )
-                ]);
+                const sessionItem: SessionItem = {
+                    id: this.currentSession.sessionHandle,
+                    label: this.currentSession.sessionName,
+                    type: 'session',
+                    sessionHandle: this.currentSession.sessionHandle,
+                    isActive: true,
+                    created: this.currentSession.created,
+                    description: `Active since ${this.currentSession.created.toLocaleTimeString()}`,
+                    tooltip: `Session: ${this.currentSession.sessionHandle}\nCreated: ${this.currentSession.created.toLocaleString()}`,
+                    contextValue: 'session',  // Changed to 'session' to match package.json context menu
+                    iconPath: new vscode.ThemeIcon('server-process'),
+                    collapsibleState: vscode.TreeItemCollapsibleState.None
+                };
+                return Promise.resolve([sessionItem]);
             }
             return Promise.resolve([]);
         }
@@ -152,6 +214,31 @@ export class SessionsProvider implements vscode.TreeDataProvider<SessionItem> {
         }
     }
 
+    /**
+     * Set a session as the active session
+     */
+    async setActiveSession(sessionItem: SessionItem): Promise<void> {
+        if (!sessionItem) {
+            return;
+        }
+        
+        // Create a SessionInfo object from the SessionItem
+        const sessionInfo: SessionInfo = {
+            sessionHandle: sessionItem.sessionHandle,
+            sessionName: sessionItem.label as string,
+            created: sessionItem.created,
+            isActive: true,
+            properties: {} // Default empty properties
+        };
+        
+        // Set as active in global state
+        this.globalSessionState.setActiveSession(sessionInfo);
+        
+        // Update UI
+        vscode.window.showInformationMessage(`Session '${sessionInfo.sessionName}' is now active`);
+        this.refresh();
+    }
+
     private getSessionInfoHtml(sessionInfo: any): string {
         return `
             <!DOCTYPE html>
@@ -228,24 +315,4 @@ export class SessionsProvider implements vscode.TreeDataProvider<SessionItem> {
     }
 }
 
-export class SessionItem extends vscode.TreeItem {
-    constructor(
-        public readonly sessionName: string,
-        public readonly sessionHandle: string,
-        public readonly isActive: boolean,
-        public readonly created: Date,
-        public readonly collapsibleState: vscode.TreeItemCollapsibleState
-    ) {
-        super(sessionName, collapsibleState);
 
-        this.tooltip = `${this.sessionName} (${this.sessionHandle})${isActive ? ' - Active' : ''}`;
-        this.description = isActive ? '● Active' : '';
-        this.contextValue = 'session';
-        
-        if (isActive) {
-            this.iconPath = new vscode.ThemeIcon('circle-filled', new vscode.ThemeColor('charts.green'));
-        } else {
-            this.iconPath = new vscode.ThemeIcon('circle-outline');
-        }
-    }
-}

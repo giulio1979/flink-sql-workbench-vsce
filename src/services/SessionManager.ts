@@ -53,6 +53,22 @@ export class SessionManager {
         }
         return SessionManager.instance;
     }
+    
+    /**
+     * Update the FlinkApiService instance
+     * Used when connection changes in SimpleConnection
+     */
+    setFlinkApi(flinkApi: FlinkApiService): void {
+        log.info('Updating FlinkApiService in SessionManager');
+        this.flinkApi = flinkApi;
+        
+        // Reset session state when API changes
+        if (this.currentSession) {
+            this.currentSession = null;
+            // Notify listeners that session is gone
+            this.listeners.forEach(listener => listener(null));
+        }
+    }
 
     private loadSessionProperties(): void {
         const sessionConfig = vscode.workspace.getConfiguration('flinkSqlWorkbench.session');
@@ -167,7 +183,14 @@ export class SessionManager {
     // Validate if current session is still active
     async validateSession(): Promise<boolean> {
         if (!this.currentSession) {
-            return false;
+            // Create a new session if none exists
+            try {
+                await this.createSession();
+                return true;
+            } catch (error: any) {
+                log.warn(`Failed to create a new session: ${error?.message || 'Unknown error'}`);
+                return false;
+            }
         }
 
         try {
@@ -177,10 +200,18 @@ export class SessionManager {
             return true;
         } catch (error: any) {
             log.warn(`Session validation failed: ${error.message}`);
-            this.currentSession = null;
-            this.sessionStartTime = null;
-            this.notifyListeners();
-            return false;
+            
+            // Try to create a new session when validation fails
+            try {
+                await this.createSession();
+                return true;
+            } catch (createError: any) {
+                log.warn(`Failed to create a replacement session: ${createError?.message || 'Unknown error'}`);
+                this.currentSession = null;
+                this.sessionStartTime = null;
+                this.notifyListeners();
+                return false;
+            }
         }
     }
 

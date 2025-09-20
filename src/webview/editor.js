@@ -229,7 +229,13 @@ function setupEventHandlers() {
                     updateExecutionProgress(message);
                     break;
                 case 'queryExecuted':
-                    setExecutionStatus(message.success, message.error);
+                    setExecutionStatus(message.success, message.error, message.isStreaming);
+                    break;
+                case 'streamingQueryStarted':
+                    updateStatus('Streaming query started. Results will update automatically.', 'streaming');
+                    break;
+                case 'streamingUpdate':
+                    updateStreamingStatus(message);
                     break;
             }
         });
@@ -318,14 +324,25 @@ function setExecuting(executing) {
     }
 }
 
-function setExecutionStatus(success, error) {
+function setExecutionStatus(success, error, isStreaming) {
     setExecuting(false);
     if (success) {
-        updateStatus('Query executed successfully', 'success');
-        setTimeout(() => updateStatus('Ready', ''), 3000);
+        if (isStreaming) {
+            updateStatus('Streaming query running - results updating automatically', 'streaming');
+            // Don't clear the status for streaming queries
+        } else {
+            updateStatus('Query executed successfully', 'success');
+            setTimeout(() => updateStatus('Ready', ''), 3000);
+        }
     } else {
         updateStatus(`Query failed: ${error || 'Unknown error'}`, 'error');
     }
+}
+
+function updateStreamingStatus(message) {
+    const { rowCount, timestamp } = message;
+    const time = new Date(timestamp).toLocaleTimeString();
+    updateStatus(`Streaming query - ${rowCount} rows as of ${time}`, 'streaming');
 }
 
 function updateExecutionProgress(message) {

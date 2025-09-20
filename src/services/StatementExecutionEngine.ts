@@ -50,6 +50,7 @@ export class StatementExecutionEngine {
     public operationHandle: string | null = null;
     private cancelled: boolean = false;
     private outputChannel: vscode.OutputChannel;
+    private originalStatement: string = '';
     
     // State structure as requested
     private state: ExecutionState = {
@@ -181,6 +182,9 @@ export class StatementExecutionEngine {
             `${statement.substring(0, 100)}...` : statement;
         log.info(`Starting execution for statement ${this.statementId}: ${truncatedStatement}`);
         
+        // Store the original statement for streaming detection
+        this.originalStatement = statement;
+        
         // Reset state for new execution
         this.cancelled = false;
         this.operationHandle = null;
@@ -236,11 +240,23 @@ export class StatementExecutionEngine {
             // Get session from session manager
             const session = await this.sessionManager.getSession();
             
+            if (!session || !session.sessionHandle) {
+                log.error('No active connection found! Unable to get a valid session handle.');
+                throw new Error('No active connection found! Please connect to a Flink server first.');
+            }
+            
             // Validate session
             const isValid = await this.sessionManager.validateSession();
             if (!isValid) {
                 log.info('Session invalid, creating new one...');
                 await this.sessionManager.createSession();
+                
+                // Get the new session and verify it has a handle
+                const newSession = this.sessionManager.getSessionInfo();
+                if (!newSession || !newSession.sessionHandle) {
+                    log.error('Failed to create a valid session with a session handle');
+                    throw new Error('Failed to create a valid connection. Please check your connection settings and try again.');
+                }
             }
 
             // Submit statement (use processed statement with resolved secrets)
@@ -249,13 +265,21 @@ export class StatementExecutionEngine {
             this.operationHandle = operationResponse.operationHandle;
             log.info(`Operation submitted with handle: ${this.operationHandle}`);
 
-            // Start polling loop
+            // Start polling for results directly (like the working web app)
+            console.log(`[DEBUG] Starting direct result polling for statement ${this.statementId} with operation handle: ${this.operationHandle}`);
             this.currentPollingLoop = this.pollForResults(session.sessionHandle);
+            console.log(`[DEBUG] Result polling assigned, now awaiting completion for statement ${this.statementId}`);
             const result = await this.currentPollingLoop;
+            console.log(`[DEBUG] Result polling completed for statement ${this.statementId}, result:`, result);
             
             return result;
 
         } catch (error: any) {
+            console.error(`[DEBUG] Execution failed for statement ${this.statementId}:`, {
+                error: error.message,
+                stack: error.stack,
+                operationHandle: this.operationHandle
+            });
             log.error(`Execution failed for statement ${this.statementId}: ${error.message}`);
             
             this.updateState({
@@ -268,24 +292,29 @@ export class StatementExecutionEngine {
         }
     }
 
-    // Polling loop for results
+    // Direct result polling (matches working web app approach)
     private async pollForResults(sessionHandle: string): Promise<ExecutionResult> {
+        console.log(`[DEBUG] Starting pollForResults for statement ${this.statementId} with operation handle: ${this.operationHandle}`);
+        
         let nextToken = 0;
-        let loopCount = 0;
-        const maxLoops = 1000;
         let shouldContinue = true;
-
-        while (shouldContinue && loopCount < maxLoops && !this.cancelled) {
-            loopCount++;
-            log.debug(`Polling attempt ${loopCount}/${maxLoops} with token ${nextToken} for statement ${this.statementId}`);
+        
+        console.log(`[DEBUG] Entering polling loop for statement ${this.statementId}`);
+        
+        while (shouldContinue && !this.cancelled) {
+            console.log(`[DEBUG] Polling with token ${nextToken} for statement ${this.statementId}`);
             
-            if (this.cancelled) {
-                log.warn(`Operation cancelled - stopping polling for statement ${this.statementId}`);
-                break;
-            }
-
             try {
                 const response = await this.flinkApi.getOperationResults(sessionHandle, this.operationHandle!, nextToken);
+                
+                console.log(`[DEBUG] Response for statement ${this.statementId}:`, {
+                    resultType: response.resultType,
+                    resultKind: response.resultKind,
+                    hasResults: !!response.results,
+                    columnsCount: response.results?.columns?.length || 0,
+                    dataCount: response.results?.data?.length || 0,
+                    nextResultUri: response.nextResultUri
+                });
                 
                 if (this.cancelled) {
                     log.warn(`Operation cancelled during API call - stopping for statement ${this.statementId}`);
@@ -298,7 +327,7 @@ export class StatementExecutionEngine {
                     resultKind: response.resultKind
                 };
 
-                // Handle columns (only set once)
+                // Handle columns (only set once) - matches web app
                 if (response.results && !this.state.columns.length) {
                     const columns = response.results.columns || response.results.columnInfos || [];
                     if (columns.length > 0) {
@@ -307,178 +336,106 @@ export class StatementExecutionEngine {
                     }
                 }
 
-                // Handle data for SUCCESS_WITH_CONTENT
+                // Handle data for SUCCESS_WITH_CONTENT - matches web app
                 if (response.resultKind === 'SUCCESS_WITH_CONTENT' && response.results?.data && !this.cancelled) {
                     const newRows = response.results.data;
+                    
                     if (newRows.length > 0) {
-                        log.debug(`Processing ${newRows.length} change events for statement ${this.statementId}`);
+                        log.debug(`Processing ${newRows.length} rows for statement ${this.statementId}`);
                         
-                        // Apply changelog operations to the current result set
+                        // Apply changelog operations to the current result set (matches web app)
                         let updatedResults = [...this.state.results];
-                        let insertCount = 0;
-                        let updateCount = 0;
-                        let deleteCount = 0;
                         
                         for (const row of newRows) {
-                            if (this.cancelled) {break;}
+                            if (this.cancelled) {
+                                break;
+                            }
                             
                             if (row.fields && Array.isArray(row.fields)) {
-                                // Convert fields to row object
+                                // Convert fields to row object (matches web app)
                                 const rowObject: any = {};
-                                if (this.state.columns.length > 0) {
-                                    row.fields.forEach((value: any, index: number) => {
-                                        const columnName = this.state.columns[index]?.name || `column_${index}`;
-                                        rowObject[columnName] = value;
-                                    });
-                                } else {
-                                    row.fields.forEach((value: any, index: number) => {
-                                        rowObject[`field_${index}`] = value;
-                                    });
-                                }
+                                row.fields.forEach((value: any, index: number) => {
+                                    const columnName = this.state.columns[index]?.name || `column_${index}`;
+                                    rowObject[columnName] = value;
+                                });
                                 
-                                // Apply the change operation based on the 'kind' field
+                                // Apply the change operation based on the 'kind' field (matches web app)
                                 switch (row.kind) {
                                     case 'INSERT':
-                                        // Add new row
                                         updatedResults.push(rowObject);
-                                        insertCount++;
                                         break;
-                                        
                                     case 'UPDATE_BEFORE':
-                                        // Remove the old version of the row
-                                        // Find and remove the matching row based on all field values
+                                        // Remove old version
                                         const beforeIndex = updatedResults.findIndex(existingRow => 
                                             this.rowsMatch(existingRow, rowObject)
                                         );
                                         if (beforeIndex !== -1) {
                                             updatedResults.splice(beforeIndex, 1);
-                                            log.debug(`Removed UPDATE_BEFORE row at index ${beforeIndex} for statement ${this.statementId}`);
-                                        } else {
-                                            log.warn(`UPDATE_BEFORE row not found for removal in statement ${this.statementId}`);
                                         }
                                         break;
-                                        
                                     case 'UPDATE_AFTER':
-                                        // Add the new version of the row
                                         updatedResults.push(rowObject);
-                                        updateCount++;
                                         break;
-                                        
                                     case 'DELETE':
-                                        // Remove the row
                                         const deleteIndex = updatedResults.findIndex(existingRow => 
                                             this.rowsMatch(existingRow, rowObject)
                                         );
                                         if (deleteIndex !== -1) {
                                             updatedResults.splice(deleteIndex, 1);
-                                            deleteCount++;
-                                            log.debug(`Deleted row at index ${deleteIndex} for statement ${this.statementId}`);
-                                        } else {
-                                            log.warn(`DELETE row not found for removal in statement ${this.statementId}`);
                                         }
                                         break;
-                                        
                                     default:
-                                        // For backward compatibility, treat unknown kinds as INSERT
-                                        log.warn(`Unknown row kind: ${row.kind}, treating as INSERT for statement ${this.statementId}`);
+                                        // Treat unknown kinds as INSERT (matches web app)
                                         updatedResults.push(rowObject);
-                                        insertCount++;
                                         break;
                                 }
                             }
                         }
                         
-                        if (this.cancelled) {
-                            log.warn(`Operation cancelled during row processing for statement ${this.statementId}`);
-                            break;
-                        }
-                        
-                        // Update results with the new state
                         stateUpdates.results = updatedResults;
-                        log.debug(`Changelog applied for statement ${this.statementId}: +${insertCount} inserts, ~${updateCount} updates, -${deleteCount} deletes (total: ${updatedResults.length} rows)`);
                     }
                 }
 
-                // Update state with all changes
+                // Update state and notify observers
                 this.updateState(stateUpdates);
 
-                // Check if we should continue
+                // Check continuation (matches web app exactly)
                 if (response.resultType === 'EOS') {
-                    log.debug(`Received EOS - stopping for statement ${this.statementId}`);
+                    console.log(`[DEBUG] Received EOS - stopping for statement ${this.statementId}`);
                     shouldContinue = false;
                 } else if (response.nextResultUri) {
                     const tokenMatch = response.nextResultUri.match(/result\/(\d+)/);
                     if (tokenMatch) {
                         nextToken = parseInt(tokenMatch[1]);
-                        log.debug(`More results available, continuing with token ${nextToken} for statement ${this.statementId}`);
-                        
-                        // Sleep with cancellation check
-                        if (!this.cancelled) {
-                            await this.sleepWithCancellationCheck(1000); // 1 second
-                        }
+                        console.log(`[DEBUG] More results available, continuing with token ${nextToken} for statement ${this.statementId}`);
                     } else {
-                        log.debug(`Could not parse nextResultUri, stopping for statement ${this.statementId}`);
+                        console.log(`[DEBUG] Could not parse nextResultUri, stopping for statement ${this.statementId}`);
                         shouldContinue = false;
                     }
                 } else {
-                    log.debug(`No more results available for statement ${this.statementId}`);
+                    console.log(`[DEBUG] No more results, stopping for statement ${this.statementId}`);
                     shouldContinue = false;
                 }
 
-            } catch (error: any) {
-                log.error(`Polling error for statement ${this.statementId}: ${error.message}`);
-                
-                // Update state to ERROR and re-throw the error so it propagates to batch execution
-                this.updateState({
-                    statementExecutionState: 'STOPPED',
-                    resultType: 'ERROR',
-                    resultKind: 'ERROR'
-                });
-                
-                throw error; // Re-throw so batch execution can catch it and stop
-            }
-        }
-
-        // Handle final state
-        if (this.cancelled) {
-            log.warn(`Operation was cancelled for statement ${this.statementId}`);
-            
-            // Try to cancel on server
-            if (this.operationHandle) {
-                try {
-                    // Note: The React implementation had a cancelOperation method, 
-                    // but Flink API doesn't have explicit cancel - we can try to close
-                    // await this.flinkApi.closeOperation(sessionHandle, this.operationHandle);
-                } catch (e) {
-                    // Ignore errors
+                // Only sleep if we're continuing to poll
+                if (shouldContinue && !this.cancelled) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
                 }
+
+            } catch (error: any) {
+                console.error(`[DEBUG] Error polling for results for statement ${this.statementId}:`, error);
+                log.error(`Error polling for results for statement ${this.statementId}: ${error.message}`);
+                throw error;
             }
-            
-            this.updateState({
-                statementExecutionState: 'STOPPED',
-                resultType: 'CANCELLED',
-                resultKind: 'CANCELLED'
-            });
-            
-            return {
-                status: 'CANCELLED',
-                message: 'Statement execution was cancelled',
-                statementId: this.statementId,
-                state: { ...this.state }
-            };
         }
 
-        if (loopCount >= maxLoops) {
-            log.warn(`Maximum polling attempts reached for statement ${this.statementId}`);
-        }
-
-        // Final completion state
+        // Final completion state (matches web app)
         this.updateState({
             statementExecutionState: 'STOPPED'
         });
 
-        log.info(`Execution completed for statement ${this.statementId}: ${this.state.results.length} rows, ${this.state.columns.length} columns`);
-        
+        console.log(`[DEBUG] Polling completed for statement ${this.statementId}`);
+
         return {
             status: 'COMPLETED',
             message: `Statement completed. Type: ${this.state.resultType}, Kind: ${this.state.resultKind}`,
@@ -486,7 +443,6 @@ export class StatementExecutionEngine {
             state: { ...this.state }
         };
     }
-
     // Sleep with periodic cancellation checks
     private async sleepWithCancellationCheck(milliseconds: number): Promise<void> {
         const sleepStartTime = Date.now();
@@ -535,6 +491,52 @@ export class StatementExecutionEngine {
     // Check if statement was cancelled
     isCancelled(): boolean {
         return this.cancelled;
+    }
+    
+    // Determine if this is a streaming query based on the SQL and session properties
+    isStreamingQuery(): boolean {
+        // Check statement properties
+        const sql = this.originalStatement.toLowerCase() || '';
+        
+        // If it contains streaming keywords or table definition with streaming elements, consider it streaming
+        const streamingKeywords = [
+            'create table',
+            'insert into',
+            'watermark',
+            'proctime',
+            'rowtime',
+            'tumble',
+            'hop',
+            'session',
+            'group by',
+            'window',
+            'stream'
+        ];
+        
+        // Check if the query contains any streaming keywords
+        const hasStreamingKeywords = streamingKeywords.some(keyword => sql.includes(keyword));
+        
+        // Check if the query seems to be a streaming source-to-sink operation
+        const isInsertOrCreate = sql.includes('insert into') || (sql.includes('create') && sql.includes('table'));
+        
+        // Check session properties (if we can access them)
+        let streamingMode = false;
+        try {
+            const sessionInfo = this.sessionManager.getSessionInfo();
+            const properties = sessionInfo?.properties || {};
+            
+            // Check for common Flink streaming mode properties
+            if (properties['execution.runtime-mode'] === 'streaming' || 
+                properties['execution.type'] === 'streaming' ||
+                properties['stream'] === 'true') {
+                streamingMode = true;
+            }
+        } catch (e) {
+            // Ignore errors accessing session properties
+        }
+        
+        // If either the SQL or session properties indicate streaming, consider it a streaming query
+        return hasStreamingKeywords || isInsertOrCreate || streamingMode;
     }
 
     // Show output

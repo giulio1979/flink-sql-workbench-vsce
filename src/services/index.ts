@@ -7,8 +7,7 @@ export { SessionManager } from './SessionManager';
 export { StatementExecutionEngine } from './StatementExecutionEngine';
 export { StatementManager } from './StatementManager';
 export { FlinkGatewayServiceAdapter } from './FlinkGatewayServiceAdapter';
-export { CredentialService } from './CredentialService';
-export { SecretProcessor, SecretProcessingError } from './SecretProcessor';
+export { CredentialManagerService } from './CredentialManagerService';
 
 // Export types with specific names to avoid conflicts
 export type { 

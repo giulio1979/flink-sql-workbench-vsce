@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { createModuleLogger } from './logger';
-import { CredentialService } from './CredentialService';
+import { CredentialManagerService } from './CredentialManagerService';
 
 const log = createModuleLogger('FlinkApiService');
 
@@ -71,8 +71,14 @@ export class FlinkApiService {
         log.traceEnter('initializeFromCredentialManager');
         
         try {
-            const credentialService = CredentialService.getInstance();
-            const connection = await credentialService.getCurrentConnection();
+            const connectionId = vscode.workspace.getConfiguration('flinkSqlWorkbench.gateway').get<string>('connectionId');
+            if (!connectionId) {
+                log.info('No connection ID configured, skipping credential manager initialization');
+                log.traceExit('initializeFromCredentialManager');
+                return;
+            }
+            
+            const connection = await CredentialManagerService.getConnectionById(connectionId);
             
             if (connection) {
                 log.info('Using credentials from Credential Manager', { connectionId: connection.id, connectionName: connection.name });
@@ -82,23 +88,13 @@ export class FlinkApiService {
                     this.setBaseUrl(connection.url);
                 }
                 
-                // Set credentials from headers
-                if (connection.headers?.['Authorization']) {
-                    const authHeader = connection.headers['Authorization'];
-                    if (authHeader.startsWith('Basic ')) {
-                        // Extract credentials from basic auth header
-                        const base64Credentials = authHeader.replace('Basic ', '');
-                        const credentials = Buffer.from(base64Credentials, 'base64').toString('ascii');
-                        const [username, password] = credentials.split(':');
-                        this.setCredentials(username, password);
-                    } else if (authHeader.startsWith('Bearer ')) {
-                        // Extract token from bearer auth header
-                        const token = authHeader.replace('Bearer ', '');
-                        this.setCredentials(undefined, undefined, token);
-                    }
-                }
+                // Set credentials using the new service
+                const credentials = CredentialManagerService.connectionToCredentials(connection);
+                this.setCredentials(credentials.username, credentials.password, credentials.apiToken);
+                
+                log.info('Credentials loaded from credential manager successfully');
             } else {
-                log.info('No connection configured in Credential Manager, using direct configuration');
+                log.warn(`Connection with ID ${connectionId} not found in Credential Manager`);
             }
         } catch (error) {
             log.error('Failed to initialize from Credential Manager:', error);
@@ -119,10 +115,52 @@ export class FlinkApiService {
             // The proxy should handle routing to the actual Flink Gateway
             return `/api/flink${endpoint}`;
         }
+        
+        // For direct connections, ensure the endpoint has the correct format
+        // Some Flink servers have the API at /v1/* and others might not include the version prefix
+        // Check if endpoint already starts with a version prefix
+        if (!endpoint.match(/^\/v\d+\//)) {
+            // If the endpoint doesn't have a version prefix, we need to check whether to add it
+            // For now, we'll add it for consistency with the rest of the code
+            // The fallback mechanism in `request` will try without the prefix if this fails
+            return `${this.baseUrl}${endpoint}`;
+        }
+        
         return `${this.baseUrl}${endpoint}`;
     }
 
     async request(endpoint: string, options: RequestInit = {}): Promise<any> {
+        // Try with the original endpoint first
+        try {
+            return await this.doRequest(endpoint, options);
+        } catch (error: any) {
+            // If it's a 404 and we're using a versioned endpoint, try with corrected format
+            if (error.message.includes('404') && !this.useProxy) {
+                // First try with /api/v1/ format (official API spec)
+                if (endpoint.match(/^\/v\d+\//)) {
+                    const apiEndpoint = endpoint.replace(/^\/v(\d+)\//, '/api/v$1/');
+                    log.info('request', `Retrying request with API endpoint format: ${apiEndpoint}`);
+                    
+                    try {
+                        return await this.doRequest(apiEndpoint, options);
+                    } catch (apiError) {
+                        // If that fails, try without version
+                        const endpointWithoutVersion = endpoint.replace(/^\/v\d+/, '');
+                        log.info('request', `Retrying request without version: ${endpointWithoutVersion}`);
+                        
+                        try {
+                            return await this.doRequest(endpointWithoutVersion, options);
+                        } catch (noVersionError) {
+                            throw error; // Throw original error if all attempts fail
+                        }
+                    }
+                }
+            }
+            throw error;
+        }
+    }
+    
+    private async doRequest(endpoint: string, options: RequestInit = {}): Promise<any> {
         const url = this.getProxyUrl(endpoint);
         
         log.info('request', `Making request to: ${url} (using ${this.useProxy ? 'proxy' : 'direct'} connection)`);
@@ -202,31 +240,33 @@ export class FlinkApiService {
                 
                 log.error('request', '4. Check browser network tab for more details');
             }
-            
             throw error;
         }
     }
 
-    // Get Flink info and auto-detect API version
+    /**
+     * Get Flink info and auto-detect API version
+     */
     async getInfo(): Promise<any> {
         log.traceEnter('getInfo');
         
         try {
-            // Try v1 first
-            const result = await this.request('/v1/info');
+            // Try API v1 with proper path format per the Flink SQL Gateway REST API spec
+            // https://nightlies.apache.org/flink/flink-docs-master/docs/dev/table/sql-gateway/rest/
+            const result = await this.request('/api/v1/info');
             this.apiVersion = 'v1';
             log.info('getInfo', 'Using Flink API v1');
             log.traceExit('getInfo', result);
             return result;
         } catch (error) {
             try {
-                const result = await this.request('/v2/info');
-                this.apiVersion = 'v2';
-                log.info('getInfo', 'Using Flink API v2');
+                const result = await this.request('/v1/info');
+                this.apiVersion = 'v1';
+                log.info('getInfo', 'Using Flink API v1 (without /api prefix)');
                 log.traceExit('getInfo', result);
                 return result;
             } catch (error2: any) {
-                log.error('getInfo', `Both API v1 and v2 failed: ${error2.message}`);
+                log.error('getInfo', `Both API paths failed: ${error2.message}`);
                 throw error2;
             }
         }
@@ -236,7 +276,8 @@ export class FlinkApiService {
     async createSession(properties: Record<string, string> = {}): Promise<any> {
         log.traceEnter('createSession', { properties });
         
-        const endpoint = `/${this.apiVersion}/sessions`;
+        // Use the new API path format with fallback to legacy format
+        let endpoint = `/api/${this.apiVersion}/sessions`;
         log.info('createSession', 'Creating session');
         
         // Flink SQL Gateway expects properties to be wrapped in a "properties" field
@@ -244,68 +285,137 @@ export class FlinkApiService {
             properties: properties
         };
         
-        const response = await this.request(endpoint, {
-            method: 'POST',
-            body: JSON.stringify(requestBody),
-        });
-        
-        log.info('createSession', `Session created: ${response.sessionHandle}`);
-        log.traceExit('createSession', response);
-        return response;
+        try {
+            // Try with the proper API path format first
+            const response = await this.request(endpoint, {
+                method: 'POST',
+                body: JSON.stringify(requestBody),
+            });
+            
+            log.info('createSession', `Session created: ${response.sessionHandle}`);
+            log.traceExit('createSession', response);
+            return response;
+        } catch (error) {
+            // Fall back to legacy path format if the first attempt fails
+            endpoint = `/${this.apiVersion}/sessions`;
+            const response = await this.request(endpoint, {
+                method: 'POST',
+                body: JSON.stringify(requestBody),
+            });
+            
+            log.info('createSession', `Session created with legacy path: ${response.sessionHandle}`);
+            log.traceExit('createSession', response);
+            return response;
+        }
     }
 
     // Get session info
     async getSession(sessionHandle: string): Promise<any> {
         log.traceEnter('getSession', { sessionHandle });
         
-        const endpoint = `/${this.apiVersion}/sessions/${sessionHandle}`;
-        const response = await this.request(endpoint);
-        
-        log.traceExit('getSession', response);
-        return response;
+        try {
+            // Try with the proper API path format first
+            const endpoint = `/api/${this.apiVersion}/sessions/${sessionHandle}`;
+            const response = await this.request(endpoint);
+            
+            log.traceExit('getSession', response);
+            return response;
+        } catch (error) {
+            // Fall back to legacy path format if the first attempt fails
+            const endpoint = `/${this.apiVersion}/sessions/${sessionHandle}`;
+            const response = await this.request(endpoint);
+            
+            log.traceExit('getSession', response);
+            return response;
+        }
     }
 
     // Close a session
     async closeSession(sessionHandle: string): Promise<any> {
         log.traceEnter('closeSession', { sessionHandle });
         
-        const endpoint = `/${this.apiVersion}/sessions/${sessionHandle}`;
-        log.info('closeSession', `Closing session: ${sessionHandle}`);
-        
-        const response = await this.request(endpoint, {
-            method: 'DELETE',
-        });
-        
-        log.info('closeSession', 'Session closed');
-        log.traceExit('closeSession', response);
-        return response;
+        try {
+            // Try with the proper API path format first
+            const endpoint = `/api/${this.apiVersion}/sessions/${sessionHandle}`;
+            log.info('closeSession', `Closing session: ${sessionHandle}`);
+            
+            const response = await this.request(endpoint, {
+                method: 'DELETE',
+            });
+            
+            log.info('closeSession', 'Session closed');
+            log.traceExit('closeSession', response);
+            return response;
+        } catch (error) {
+            // Fall back to legacy path format if the first attempt fails
+            const endpoint = `/${this.apiVersion}/sessions/${sessionHandle}`;
+            log.info('closeSession', `Closing session with legacy path: ${sessionHandle}`);
+            
+            const response = await this.request(endpoint, {
+                method: 'DELETE',
+            });
+            
+            log.info('closeSession', 'Session closed');
+            log.traceExit('closeSession', response);
+            return response;
+        }
     }
 
     // Submit a SQL statement
     async submitStatement(sessionHandle: string, statement: string): Promise<any> {
         log.traceEnter('submitStatement', { sessionHandle, statementLength: statement.length });
         
-        const endpoint = `/${this.apiVersion}/sessions/${sessionHandle}/statements`;
         const truncatedStatement = statement.length > 100 ? `${statement.substring(0, 100)}...` : statement;
         log.info('submitStatement', `Executing SQL: ${truncatedStatement}`);
         
-        const response = await this.request(endpoint, {
-            method: 'POST',
-            body: JSON.stringify({ statement }),
-        });
-        
-        log.info('submitStatement', `Statement submitted: ${response.operationHandle}`);
-        log.traceExit('submitStatement', response);
-        return response;
+        try {
+            // Try with the proper API path format first
+            const endpoint = `/api/${this.apiVersion}/sessions/${sessionHandle}/statements`;
+            const response = await this.request(endpoint, {
+                method: 'POST',
+                body: JSON.stringify({ statement }),
+            });
+            
+            log.info('submitStatement', `Statement submitted: ${response.operationHandle}`);
+            log.traceExit('submitStatement', response);
+            return response;
+        } catch (error) {
+            try {
+                // Fall back to legacy path format if the first attempt fails
+                log.info('submitStatement', 'Falling back to legacy path format');
+                const endpoint = `/${this.apiVersion}/sessions/${sessionHandle}/statements`;
+                const response = await this.request(endpoint, {
+                    method: 'POST',
+                    body: JSON.stringify({ statement }),
+                });
+                
+                log.info('submitStatement', `Statement submitted with legacy path: ${response.operationHandle}`);
+                log.traceExit('submitStatement', response);
+                return response;
+            } catch (fallbackError) {
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                const fallbackErrorMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+                log.error('submitStatement', `Both API paths failed. Original error: ${errorMessage}`);
+                log.error('submitStatement', `Fallback error: ${fallbackErrorMessage}`);
+                throw fallbackError;
+            }
+        }
     }
 
     // Get operation status
     async getOperationStatus(sessionHandle: string, operationHandle: string): Promise<any> {
         log.trace('getOperationStatus', `Checking status for operation: ${operationHandle}`);
         
-        const endpoint = `/${this.apiVersion}/sessions/${sessionHandle}/operations/${operationHandle}/status`;
-        
-        const response = await this.request(endpoint);
+        let response;
+        try {
+            // Try with the proper API path format first
+            const endpoint = `/api/${this.apiVersion}/sessions/${sessionHandle}/operations/${operationHandle}/status`;
+            response = await this.request(endpoint);
+        } catch (error) {
+            // Fall back to legacy path format if the first attempt fails
+            const endpoint = `/${this.apiVersion}/sessions/${sessionHandle}/operations/${operationHandle}/status`;
+            response = await this.request(endpoint);
+        }
         
         // Only log status changes or errors, not every poll
         if (response.status === 'ERROR') {
@@ -325,11 +435,52 @@ export class FlinkApiService {
         return response;
     }
 
+    // Close an operation
+    async closeOperation(sessionHandle: string, operationHandle: string): Promise<any> {
+        log.traceEnter('closeOperation', { sessionHandle, operationHandle });
+        
+        try {
+            // Try with the proper API path format first
+            const endpoint = `/api/${this.apiVersion}/sessions/${sessionHandle}/operations/${operationHandle}`;
+            log.info('closeOperation', `Closing operation: ${operationHandle}`);
+            
+            const response = await this.request(endpoint, {
+                method: 'DELETE',
+            });
+            
+            log.info('closeOperation', 'Operation closed');
+            log.traceExit('closeOperation', response);
+            return response;
+        } catch (error: any) {
+            // Fall back to legacy path format if the first attempt fails
+            try {
+                const endpoint = `/${this.apiVersion}/sessions/${sessionHandle}/operations/${operationHandle}`;
+                const response = await this.request(endpoint, {
+                    method: 'DELETE',
+                });
+                
+                log.info('closeOperation', 'Operation closed with legacy path');
+                log.traceExit('closeOperation', response);
+                return response;
+            } catch (fallbackError: any) {
+                log.error('closeOperation', `Failed to close operation: ${fallbackError.message}`);
+                throw fallbackError;
+            }
+        }
+    }
+    
     // Get operation results
     async getOperationResults(sessionHandle: string, operationHandle: string, token: number = 0, rowFormat: string = 'JSON'): Promise<any> {
-        const endpoint = `/${this.apiVersion}/sessions/${sessionHandle}/operations/${operationHandle}/result/${token}?rowFormat=${rowFormat}`;
-        
-        const response = await this.request(endpoint);
+        let response;
+        try {
+            // Try with the proper API path format first
+            const endpoint = `/api/${this.apiVersion}/sessions/${sessionHandle}/operations/${operationHandle}/result/${token}?rowFormat=${rowFormat}`;
+            response = await this.request(endpoint);
+        } catch (error) {
+            // Fall back to legacy path format if the first attempt fails
+            const endpoint = `/${this.apiVersion}/sessions/${sessionHandle}/operations/${operationHandle}/result/${token}?rowFormat=${rowFormat}`;
+            response = await this.request(endpoint);
+        }
         
         // Only log significant events, not every token fetch
         if (token === 0) {

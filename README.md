@@ -34,7 +34,6 @@ A comprehensive VS Code extension for editing, executing, and managing Apache Fl
 - **Error Handling**: Rich error reporting with context and suggestions
 - **Keyboard Shortcuts**: Efficient shortcuts for common operations
 - **Command Palette**: Full command palette integration
-- **Secret Processing**: Automatic replacement of Kubernetes secret references with environment variables for local development
 
 ## 📥 Installation
 
@@ -53,47 +52,41 @@ A comprehensive VS Code extension for editing, executing, and managing Apache Fl
 ## ⚙️ Configuration
 
 ### Quick Setup
-1. Install the **Kafka Credential Manager** extension (dependency)
-2. Open VS Code settings (Ctrl+,)
-3. Search for "Flink SQL Workbench"
-4. Configure your Flink SQL Gateway URL: `http://localhost:8083`
-5. Use the Credential Manager to securely store your gateway credentials
+1. **Recommended**: Use a credential manager extension to store your connections securely
+2. Set up your connection in the credential manager with type `flink-gateway`
+3. Configure the connection ID in VS Code settings: `flinkSqlWorkbench.gateway.connectionId`
 
-### Connection Management
+### Gateway Configuration
 
-This extension now integrates with the **Kafka Credential Manager** extension for secure credential storage. 
+#### Using Credential Manager (Required)
+All authentication is now handled through a credential manager extension:
 
-#### Setting up Connections
-1. Open the Connection Manager: `Ctrl+Shift+C` or use Command Palette
-2. Create a new connection with your Flink Gateway details
-3. Set the connection type to "connect" 
-4. Configure authentication (none, basic, or bearer token)
-5. In Flink SQL Workbench settings, set the Connection ID to use your stored connection
-
-#### Gateway Configuration
-
-#### Using Credential Manager (Recommended)
 ```json
 {
-  "flinkSqlWorkbench.gateway.connectionId": "my-flink-gateway-connection",
-  "flinkSqlWorkbench.gateway.apiVersion": "auto"
+  "flinkSqlWorkbench.gateway.connectionId": "your-connection-id"
 }
 ```
 
-#### Fallback Configuration (Legacy)
+Your credential manager should have a connection configured like:
+```json
+{
+  "id": "your-connection-id",
+  "name": "Production Flink Gateway",
+  "type": "flink-gateway", 
+  "url": "https://flink-gateway.example.com:8083",
+  "authType": "basic",
+  "username": "your-username"
+}
+```
+
+#### Basic Connection (No Authentication)
+For development environments without authentication:
 ```json
 {
   "flinkSqlWorkbench.gateway.url": "http://localhost:8083",
   "flinkSqlWorkbench.gateway.apiVersion": "auto",
   "flinkSqlWorkbench.gateway.timeout": 30000
 }
-```
-
-When a `connectionId` is configured, the extension will:
-- Use the URL from the stored connection
-- Apply authentication credentials automatically
-- Fall back to direct configuration if the connection is not found
-
 ### Session Configuration
 
 #### Default Session Properties
@@ -222,30 +215,12 @@ When a `connectionId` is configured, the extension will:
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `flinkSqlWorkbench.gateway.connectionId` | string | `""` | **Recommended**: Connection ID from Credential Manager |
-| `flinkSqlWorkbench.gateway.url` | string | `http://localhost:8083` | ⚠️ **Deprecated**: Fallback Gateway URL when no connectionId is set |
+| `flinkSqlWorkbench.gateway.connectionId` | string | `""` | **Required**: Connection ID from credential manager |
+| `flinkSqlWorkbench.gateway.url` | string | `http://localhost:8083` | Flink SQL Gateway URL (overridden by connection) |
 | `flinkSqlWorkbench.gateway.useProxy` | boolean | `false` | Use proxy for CORS issues |
 | `flinkSqlWorkbench.gateway.apiVersion` | string | `auto` | API version (v1, v2, auto) |
 | `flinkSqlWorkbench.gateway.timeout` | number | `30000` | Request timeout (ms) |
 | `flinkSqlWorkbench.gateway.maxRetries` | number | `3` | Max retry attempts |
-
-### Connection Management
-
-Connection details (URL and authentication) are now managed through the **Kafka Credential Manager** extension. 
-
-**Recommended Approach:**
-1. Create connections in the Credential Manager 
-2. Reference them by ID in the `gateway.connectionId` setting
-3. The extension will automatically use the URL and credentials from the stored connection
-
-### Legacy Settings
-
-The following settings are deprecated and will be removed in future versions:
-- `flinkSqlWorkbench.gateway.authentication.username` 
-- `flinkSqlWorkbench.gateway.authentication.password`
-- `flinkSqlWorkbench.gateway.authentication.apiToken`
-
-Please migrate to using the Credential Manager extension for secure credential storage.
 
 ### Session Settings
 
@@ -302,17 +277,6 @@ Please migrate to using the Credential Manager extension for secure credential s
 |---------|------|---------|-------------|
 | `flinkSqlWorkbench.ui.theme` | string | `auto` | Panel theme (auto, dark, light) |
 
-### Secret Processing Settings
-
-| Setting | Type | Default | Description |
-|---------|------|---------|-------------|
-| `flinkSqlWorkbench.secrets.enableSecretProcessing` | boolean | `true` | Enable processing of secret references for local development |
-| `flinkSqlWorkbench.secrets.validateBeforeExecution` | boolean | `true` | Validate environment variables before executing SQL with secrets |
-
-The extension can automatically process Kubernetes secret references in your SQL statements during local development. Secret references like `${secrets://namespace:secretname/key}` are replaced with corresponding environment variable values.
-
-For detailed information, see [SECRET_PROCESSING.md](SECRET_PROCESSING.md).
-
 ## 🔧 Advanced Usage
 
 ### Custom Session Properties
@@ -350,7 +314,7 @@ Use VS Code workspace settings for project-specific configurations:
 // .vscode/settings.json
 {
   "flinkSqlWorkbench.gateway.url": "https://production-flink.example.com:8083",
-  "flinkSqlWorkbench.gateway.connectionId": "production-flink-gateway",
+  "flinkSqlWorkbench.gateway.authentication.apiToken": "${FLINK_API_TOKEN}",
   "flinkSqlWorkbench.session.properties": {
     "execution.runtime-mode": "streaming",
     "table.exec.resource.default-parallelism": "8"

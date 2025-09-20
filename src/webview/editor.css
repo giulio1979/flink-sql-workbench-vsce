@@ -75,6 +75,17 @@ body {
     color: var(--vscode-errorForeground);
 }
 
+.status.streaming {
+    color: var(--vscode-charts-purple);
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.6; }
+    100% { opacity: 1; }
+}
+
 #editor-container {
     flex: 1;
     height: calc(100vh - 41px); /* Subtract toolbar height */

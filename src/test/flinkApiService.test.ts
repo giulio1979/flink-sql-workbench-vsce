@@ -22,7 +22,7 @@ suite('FlinkApiService unit tests', () => {
 
     test('createSession should post to sessions and return session handle', async () => {
         nock(baseUrl)
-            .post('/v1/sessions', body => {
+            .post('/v1/sessions', (body: any) => {
                 return body && body.properties;
             })
             .reply(201, { sessionHandle: 'abc-123' });

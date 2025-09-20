@@ -3,6 +3,7 @@ import { SessionManager } from './SessionManager';
 import { StatementExecutionEngine, ExecutionResult, StatementNotification } from './StatementExecutionEngine';
 import { FlinkApiService } from './FlinkApiService';
 import { createModuleLogger } from './logger';
+import { GlobalSessionState } from './GlobalSessionState';
 
 const log = createModuleLogger('StatementManager');
 
@@ -26,6 +27,7 @@ export interface GlobalStatementEvent {
 export class StatementManager {
     private flinkApi: FlinkApiService;
     private sessionManager: SessionManager;
+    private globalSessionState: GlobalSessionState;
     private activeStatements = new Map<string, StatementExecutionEngine>();
     private globalObservers = new Set<(event: GlobalStatementEvent) => void>();
     private outputChannel: vscode.OutputChannel;
@@ -33,9 +35,22 @@ export class StatementManager {
     constructor(flinkApi: FlinkApiService) {
         this.flinkApi = flinkApi;
         this.sessionManager = SessionManager.getInstance(flinkApi);
+        this.globalSessionState = GlobalSessionState.getInstance();
         this.outputChannel = vscode.window.createOutputChannel('Flink Statement Manager');
         
         log.info('StatementManager initialized');
+    }
+    
+    /**
+     * Update the FlinkApiService instance
+     * Used when connection changes in SimpleConnection
+     */
+    setFlinkApi(flinkApi: FlinkApiService): void {
+        log.info('Updating FlinkApiService in StatementManager');
+        this.flinkApi = flinkApi;
+        
+        // Cancel all active statements when API changes
+        this.cancelAllStatements();
     }
 
     // Add global observer for all statement events
@@ -147,6 +162,107 @@ export class StatementManager {
 
     // Execute SQL statement (creates a new StatementExecutionEngine)
     async executeSQL(statement: string, statementId?: string): Promise<ExecutionResult> {
+        // Check if we have a valid connection before proceeding
+        if (!this.flinkApi) {
+            const errorMessage = 'No Flink API service available. Please connect to a Flink gateway first.';
+            log.error(errorMessage);
+            
+            // Show an informative message to the user
+            vscode.window.showErrorMessage(errorMessage);
+            
+            return {
+                status: 'ERROR',
+                message: errorMessage,
+                statementId: statementId || `statement_${Date.now()}`,
+                error: errorMessage,
+                state: {
+                    columns: [],
+                    results: [],
+                    statementExecutionState: 'STOPPED',
+                    resultType: 'UNKNOWN',
+                    resultKind: 'UNKNOWN',
+                    lastUpdateTime: Date.now()
+                }
+            };
+        }
+        
+        // Ensure we have a valid session
+        try {
+            // First check global session state
+            const activeSession = this.globalSessionState.getActiveSession();
+            if (activeSession) {
+                log.info(`Using active session from global state: ${activeSession.sessionName}`);
+                
+                // Verify the session is still valid
+                const isValid = await this.globalSessionState.validateActiveSession(this.sessionManager);
+                if (!isValid) {
+                    log.info('Active session in global state is not valid, creating a new one');
+                    await this.globalSessionState.setActiveSessionFromManager(this.sessionManager);
+                }
+            } else {
+                log.info('No active session found in global state, checking session manager');
+                
+                if (!this.sessionManager.isConnected()) {
+                    log.info('No active session found in session manager, creating one automatically');
+                    await this.sessionManager.getSession();
+                }
+                
+                // Update the global session state with the session from the manager
+                await this.globalSessionState.setActiveSessionFromManager(this.sessionManager);
+            }
+            
+            // Ensure we have a valid session handle after all this
+            if (!this.sessionManager.getCurrentSessionHandle()) {
+                throw new Error('Failed to obtain a valid session handle');
+            }
+        } catch (error: any) {
+            const errorMessage = `Failed to create or validate session: ${error?.message || 'Unknown error'}`;
+            log.error(errorMessage);
+            
+            // Show an informative message to the user
+            vscode.window.showErrorMessage(errorMessage);
+            
+            return {
+                status: 'ERROR',
+                message: errorMessage,
+                statementId: statementId || `statement_${Date.now()}`,
+                error: errorMessage,
+                state: {
+                    columns: [],
+                    results: [],
+                    statementExecutionState: 'STOPPED',
+                    resultType: 'UNKNOWN',
+                    resultKind: 'UNKNOWN',
+                    lastUpdateTime: Date.now()
+                }
+            };
+        }
+        
+        // Verify that we have a valid session handle before proceeding
+        const currentSessionHandle = this.sessionManager.getCurrentSessionHandle();
+        if (!currentSessionHandle) {
+            const errorMessage = 'No active connection found! Unable to get a valid session handle.';
+            log.error(errorMessage);
+            
+            // Show an informative message to the user
+            vscode.window.showErrorMessage(errorMessage);
+            
+            return {
+                status: 'ERROR',
+                message: errorMessage,
+                statementId: statementId || `statement_${Date.now()}`,
+                error: errorMessage,
+                state: {
+                    columns: [],
+                    results: [],
+                    statementExecutionState: 'STOPPED',
+                    resultType: 'UNKNOWN',
+                    resultKind: 'UNKNOWN',
+                    lastUpdateTime: Date.now()
+                }
+            };
+        }
+        
         const engine = new StatementExecutionEngine(
             this.sessionManager, 
             this.flinkApi, 
@@ -227,7 +343,29 @@ export class StatementManager {
         log.info(`Cancelling statement: ${statementId}`);
         
         try {
+            // Check if this is a streaming query
+            const isStreaming = engine.isStreamingQuery?.() || false;
+            
             const result = await engine.cancel();
+            
+            // For streaming queries, we might want to close the session to fully stop the stream
+            if (isStreaming) {
+                log.info(`Cancelling a streaming query: ${statementId}`);
+                
+                // If it's a streaming query, make sure it's fully terminated
+                try {
+                    if (engine.operationHandle) {
+                        const session = this.sessionManager.getSessionInfo();
+                        if (session?.sessionHandle) {
+                            log.info(`Closing operation handle for streaming query: ${statementId}`);
+                            await this.flinkApi.closeOperation(session.sessionHandle, engine.operationHandle);
+                        }
+                    }
+                } catch (closeError: any) {
+                    log.warn(`Error while closing streaming operation: ${closeError.message}`);
+                }
+            }
+            
             this.activeStatements.delete(statementId);
             
             // Notify global observers
@@ -331,38 +469,6 @@ export class StatementManager {
     }
 
     // Legacy compatibility methods for existing code
-    
-    // Legacy method - execute SQL and return results (for backward compatibility)
-    async executeSQLLegacy(statement: string, progressCallback?: (event: any) => void): Promise<ExecutionResult> {
-        const engine = new StatementExecutionEngine(this.sessionManager, this.flinkApi);
-        
-        if (progressCallback) {
-            engine.addObserver((notification: StatementNotification) => {
-                // Transform to legacy format
-                const legacyEvent = {
-                    currentStatus: notification.state.statementExecutionState === 'RUNNING' ? 'RUNNING' : 'COMPLETED',
-                    message: `Statement ${notification.statementId}: ${notification.state.statementExecutionState}`,
-                    content: {
-                        results: notification.state.results,
-                        columns: notification.state.columns,
-                        rowCount: notification.state.results.length,
-                        columnCount: notification.state.columns.length
-                    },
-                    resultType: notification.state.resultType,
-                    resultKind: notification.state.resultKind,
-                    status: notification.state.statementExecutionState === 'RUNNING' ? 'RUNNING' : 'FINISHED',
-                    results: notification.state.results,
-                    columns: notification.state.columns,
-                    timestamp: notification.timestamp,
-                    operationHandle: notification.operationHandle,
-                    statementId: notification.statementId
-                };
-                progressCallback(legacyEvent);
-            });
-        }
-        
-        return engine.executeSQL(statement);
-    }
 
     // Legacy method - cancel operation (for backward compatibility)  
     async cancelOperation(operationHandle: string): Promise<{ success: boolean; message: string }> {
