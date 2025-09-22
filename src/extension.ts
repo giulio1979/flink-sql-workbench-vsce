@@ -145,32 +145,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             }
         }),
 
-        vscode.commands.registerCommand('flinkSqlWorkbench.openCredentialManager', async () => {
-            // Open credential manager extension view
-            const candidateCommands = [
-                'workbench.view.extension.credential-manager',
-                'credential-manager.open',
-                'extension.credential-manager.focus',
-                'workbench.view.extensions'
-            ];
-
-            let opened = false;
-            for (const cmd of candidateCommands) {
-                try {
-                    await vscode.commands.executeCommand(cmd);
-                    opened = true;
-                    break;
-                } catch (err) {
-                    // Try next candidate
-                }
-            }
-
-            if (!opened) {
-                try {
-                    await vscode.commands.executeCommand('workbench.extensions.search', '@id:IuliusHutuleac.credential-manager');
-                } catch (err) {
-                    vscode.window.showErrorMessage('Could not open Credential Manager view. Please ensure the extension "IuliusHutuleac.credential-manager" is installed and enabled.');
-                }
+        vscode.commands.registerCommand('flink-sql-workbench.openCredentialManager', async () => {
+            // Open credential manager using the correct command
+            try {
+                await vscode.commands.executeCommand('credentialManager.openConnectionManager');
+            } catch (error) {
+                vscode.window.showErrorMessage('Could not open Credential Manager. Please ensure the extension "IuliusHutuleac.credential-manager" is installed and enabled.');
             }
         }),
 

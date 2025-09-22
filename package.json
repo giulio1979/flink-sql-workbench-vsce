@@ -2,7 +2,7 @@
   "name": "flink-sql-workbench",
   "displayName": "Flink SQL Workbench",
   "description": "VS Code extension for editing and executing Flink SQL with gateway session management (Avichay Marciano, Iulius Hutuleac)",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "license": "MIT",
   "repository": {
     "type": "git",
