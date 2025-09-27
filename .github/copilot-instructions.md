@@ -44,15 +44,9 @@
 
 **FlinkApiService.ts:**
 ```typescript
-// MUST maintain API path fallback
-try {
-    return await this.makeRequest('/api/v1/sessions', ...);
-} catch (error) {
-    if (error.status === 404) {
-        return await this.makeRequest('/v1/sessions', ...);
-    }
-    throw error;
-}
+// Use correct Flink SQL Gateway API path format
+const endpoint = '/v1/sessions';
+return await this.makeRequest(endpoint, ...);
 ```
 
 **StatementExecutionEngine.ts:**
@@ -95,7 +89,7 @@ private async pollForResults(sessionHandle: string): Promise<ExecutionResult> {
 
 ### ❌ NEVER
 1. Add operation status polling
-2. Modify API path fallback mechanism
+2. Use incorrect API paths (avoid `/api/v1/` - use `/v1/` instead)
 3. Add delays after EOS signal
 4. Remove debug logging
 5. Change core polling structure
@@ -104,12 +98,12 @@ private async pollForResults(sessionHandle: string): Promise<ExecutionResult> {
 1. Test with real Flink Gateway before changes
 2. Verify polling stops on EOS without extra calls
 3. Maintain submit→poll flow (no intermediate status)
-4. Preserve API fallback (`/api/v1/` → `/v1/`)
+4. Use correct API paths (`/v1/` format)
 5. Compile and test before committing
 
 ### 📋 Pre-Commit Testing Checklist
 - [ ] `SHOW DATABASES` works and stops cleanly on EOS
-- [ ] API fallback works for both `/api/v1/` and `/v1/` endpoints
+- [ ] API endpoints use correct `/v1/` format
 - [ ] No extra polling calls after EOS signal
 - [ ] Extension compiles without errors
 - [ ] Debug logs show correct API flow
@@ -157,7 +151,7 @@ private async pollForResults(sessionHandle: string): Promise<ExecutionResult> {
 - `GET /v1/sessions/{sessionHandle}/operations/{operationHandle}/result/{token}` - Get results
 - `GET /v1/sessions/{sessionHandle}/complete-statement` - Get completion hints
 
-### Important: Use `/v1/` paths with fallback to `/api/v1/` as implemented in FlinkApiService.ts
+### Important: Use `/v1/` paths as per the official Flink SQL Gateway REST API specification
 
 ---
 

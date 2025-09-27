@@ -30,7 +30,7 @@ export class FlinkApiService {
     private credentials: GatewayCredentials | null = null;
     private outputChannel: vscode.OutputChannel;
 
-    constructor(baseUrl: string = '/api/flink') {
+    constructor(baseUrl: string = 'http://localhost:8083') {
         log.traceEnter('constructor', { baseUrl });
         
         this.baseUrl = baseUrl;
@@ -130,34 +130,7 @@ export class FlinkApiService {
     }
 
     async request(endpoint: string, options: RequestInit = {}): Promise<any> {
-        // Try with the original endpoint first
-        try {
-            return await this.doRequest(endpoint, options);
-        } catch (error: any) {
-            // If it's a 404 and we're using a versioned endpoint, try with corrected format
-            if (error.message.includes('404') && !this.useProxy) {
-                // First try with /api/v1/ format (official API spec)
-                if (endpoint.match(/^\/v\d+\//)) {
-                    const apiEndpoint = endpoint.replace(/^\/v(\d+)\//, '/api/v$1/');
-                    log.info('request', `Retrying request with API endpoint format: ${apiEndpoint}`);
-                    
-                    try {
-                        return await this.doRequest(apiEndpoint, options);
-                    } catch (apiError) {
-                        // If that fails, try without version
-                        const endpointWithoutVersion = endpoint.replace(/^\/v\d+/, '');
-                        log.info('request', `Retrying request without version: ${endpointWithoutVersion}`);
-                        
-                        try {
-                            return await this.doRequest(endpointWithoutVersion, options);
-                        } catch (noVersionError) {
-                            throw error; // Throw original error if all attempts fail
-                        }
-                    }
-                }
-            }
-            throw error;
-        }
+        return await this.doRequest(endpoint, options);
     }
     
     private async doRequest(endpoint: string, options: RequestInit = {}): Promise<any> {
@@ -250,34 +223,21 @@ export class FlinkApiService {
     async getInfo(): Promise<any> {
         log.traceEnter('getInfo');
         
-        try {
-            // Try API v1 with proper path format per the Flink SQL Gateway REST API spec
-            // https://nightlies.apache.org/flink/flink-docs-master/docs/dev/table/sql-gateway/rest/
-            const result = await this.request('/api/v1/info');
-            this.apiVersion = 'v1';
-            log.info('getInfo', 'Using Flink API v1');
-            log.traceExit('getInfo', result);
-            return result;
-        } catch (error) {
-            try {
-                const result = await this.request('/v1/info');
-                this.apiVersion = 'v1';
-                log.info('getInfo', 'Using Flink API v1 (without /api prefix)');
-                log.traceExit('getInfo', result);
-                return result;
-            } catch (error2: any) {
-                log.error('getInfo', `Both API paths failed: ${error2.message}`);
-                throw error2;
-            }
-        }
+        // Use the correct Flink SQL Gateway REST API path format
+        // https://nightlies.apache.org/flink/flink-docs-master/docs/dev/table/sql-gateway/rest/
+        const result = await this.request('/v1/info');
+        this.apiVersion = 'v1';
+        log.info('getInfo', 'Using Flink API v1');
+        log.traceExit('getInfo', result);
+        return result;
     }
 
     // Create a new session
     async createSession(properties: Record<string, string> = {}): Promise<any> {
         log.traceEnter('createSession', { properties });
         
-        // Use the new API path format with fallback to legacy format
-        let endpoint = `/api/${this.apiVersion}/sessions`;
+        // Use the correct API path format
+        const endpoint = `/${this.apiVersion}/sessions`;
         log.info('createSession', 'Creating session');
         
         // Flink SQL Gateway expects properties to be wrapped in a "properties" field
@@ -285,80 +245,41 @@ export class FlinkApiService {
             properties: properties
         };
         
-        try {
-            // Try with the proper API path format first
-            const response = await this.request(endpoint, {
-                method: 'POST',
-                body: JSON.stringify(requestBody),
-            });
-            
-            log.info('createSession', `Session created: ${response.sessionHandle}`);
-            log.traceExit('createSession', response);
-            return response;
-        } catch (error) {
-            // Fall back to legacy path format if the first attempt fails
-            endpoint = `/${this.apiVersion}/sessions`;
-            const response = await this.request(endpoint, {
-                method: 'POST',
-                body: JSON.stringify(requestBody),
-            });
-            
-            log.info('createSession', `Session created with legacy path: ${response.sessionHandle}`);
-            log.traceExit('createSession', response);
-            return response;
-        }
+        const response = await this.request(endpoint, {
+            method: 'POST',
+            body: JSON.stringify(requestBody),
+        });
+        
+        log.info('createSession', `Session created: ${response.sessionHandle}`);
+        log.traceExit('createSession', response);
+        return response;
     }
 
     // Get session info
     async getSession(sessionHandle: string): Promise<any> {
         log.traceEnter('getSession', { sessionHandle });
         
-        try {
-            // Try with the proper API path format first
-            const endpoint = `/api/${this.apiVersion}/sessions/${sessionHandle}`;
-            const response = await this.request(endpoint);
-            
-            log.traceExit('getSession', response);
-            return response;
-        } catch (error) {
-            // Fall back to legacy path format if the first attempt fails
-            const endpoint = `/${this.apiVersion}/sessions/${sessionHandle}`;
-            const response = await this.request(endpoint);
-            
-            log.traceExit('getSession', response);
-            return response;
-        }
+        const endpoint = `/${this.apiVersion}/sessions/${sessionHandle}`;
+        const response = await this.request(endpoint);
+        
+        log.traceExit('getSession', response);
+        return response;
     }
 
     // Close a session
     async closeSession(sessionHandle: string): Promise<any> {
         log.traceEnter('closeSession', { sessionHandle });
         
-        try {
-            // Try with the proper API path format first
-            const endpoint = `/api/${this.apiVersion}/sessions/${sessionHandle}`;
-            log.info('closeSession', `Closing session: ${sessionHandle}`);
-            
-            const response = await this.request(endpoint, {
-                method: 'DELETE',
-            });
-            
-            log.info('closeSession', 'Session closed');
-            log.traceExit('closeSession', response);
-            return response;
-        } catch (error) {
-            // Fall back to legacy path format if the first attempt fails
-            const endpoint = `/${this.apiVersion}/sessions/${sessionHandle}`;
-            log.info('closeSession', `Closing session with legacy path: ${sessionHandle}`);
-            
-            const response = await this.request(endpoint, {
-                method: 'DELETE',
-            });
-            
-            log.info('closeSession', 'Session closed');
-            log.traceExit('closeSession', response);
-            return response;
-        }
+        const endpoint = `/${this.apiVersion}/sessions/${sessionHandle}`;
+        log.info('closeSession', `Closing session: ${sessionHandle}`);
+        
+        const response = await this.request(endpoint, {
+            method: 'DELETE',
+        });
+        
+        log.info('closeSession', 'Session closed');
+        log.traceExit('closeSession', response);
+        return response;
     }
 
     // Submit a SQL statement
@@ -368,54 +289,23 @@ export class FlinkApiService {
         const truncatedStatement = statement.length > 100 ? `${statement.substring(0, 100)}...` : statement;
         log.info('submitStatement', `Executing SQL: ${truncatedStatement}`);
         
-        try {
-            // Try with the proper API path format first
-            const endpoint = `/api/${this.apiVersion}/sessions/${sessionHandle}/statements`;
-            const response = await this.request(endpoint, {
-                method: 'POST',
-                body: JSON.stringify({ statement }),
-            });
-            
-            log.info('submitStatement', `Statement submitted: ${response.operationHandle}`);
-            log.traceExit('submitStatement', response);
-            return response;
-        } catch (error) {
-            try {
-                // Fall back to legacy path format if the first attempt fails
-                log.info('submitStatement', 'Falling back to legacy path format');
-                const endpoint = `/${this.apiVersion}/sessions/${sessionHandle}/statements`;
-                const response = await this.request(endpoint, {
-                    method: 'POST',
-                    body: JSON.stringify({ statement }),
-                });
-                
-                log.info('submitStatement', `Statement submitted with legacy path: ${response.operationHandle}`);
-                log.traceExit('submitStatement', response);
-                return response;
-            } catch (fallbackError) {
-                const errorMessage = error instanceof Error ? error.message : String(error);
-                const fallbackErrorMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
-                log.error('submitStatement', `Both API paths failed. Original error: ${errorMessage}`);
-                log.error('submitStatement', `Fallback error: ${fallbackErrorMessage}`);
-                throw fallbackError;
-            }
-        }
+        const endpoint = `/${this.apiVersion}/sessions/${sessionHandle}/statements`;
+        const response = await this.request(endpoint, {
+            method: 'POST',
+            body: JSON.stringify({ statement }),
+        });
+        
+        log.info('submitStatement', `Statement submitted: ${response.operationHandle}`);
+        log.traceExit('submitStatement', response);
+        return response;
     }
 
     // Get operation status
     async getOperationStatus(sessionHandle: string, operationHandle: string): Promise<any> {
         log.trace('getOperationStatus', `Checking status for operation: ${operationHandle}`);
         
-        let response;
-        try {
-            // Try with the proper API path format first
-            const endpoint = `/api/${this.apiVersion}/sessions/${sessionHandle}/operations/${operationHandle}/status`;
-            response = await this.request(endpoint);
-        } catch (error) {
-            // Fall back to legacy path format if the first attempt fails
-            const endpoint = `/${this.apiVersion}/sessions/${sessionHandle}/operations/${operationHandle}/status`;
-            response = await this.request(endpoint);
-        }
+        const endpoint = `/${this.apiVersion}/sessions/${sessionHandle}/operations/${operationHandle}/status`;
+        const response = await this.request(endpoint);
         
         // Only log status changes or errors, not every poll
         if (response.status === 'ERROR') {
@@ -439,48 +329,22 @@ export class FlinkApiService {
     async closeOperation(sessionHandle: string, operationHandle: string): Promise<any> {
         log.traceEnter('closeOperation', { sessionHandle, operationHandle });
         
-        try {
-            // Try with the proper API path format first
-            const endpoint = `/api/${this.apiVersion}/sessions/${sessionHandle}/operations/${operationHandle}`;
-            log.info('closeOperation', `Closing operation: ${operationHandle}`);
-            
-            const response = await this.request(endpoint, {
-                method: 'DELETE',
-            });
-            
-            log.info('closeOperation', 'Operation closed');
-            log.traceExit('closeOperation', response);
-            return response;
-        } catch (error: any) {
-            // Fall back to legacy path format if the first attempt fails
-            try {
-                const endpoint = `/${this.apiVersion}/sessions/${sessionHandle}/operations/${operationHandle}`;
-                const response = await this.request(endpoint, {
-                    method: 'DELETE',
-                });
-                
-                log.info('closeOperation', 'Operation closed with legacy path');
-                log.traceExit('closeOperation', response);
-                return response;
-            } catch (fallbackError: any) {
-                log.error('closeOperation', `Failed to close operation: ${fallbackError.message}`);
-                throw fallbackError;
-            }
-        }
+        const endpoint = `/${this.apiVersion}/sessions/${sessionHandle}/operations/${operationHandle}`;
+        log.info('closeOperation', `Closing operation: ${operationHandle}`);
+        
+        const response = await this.request(endpoint, {
+            method: 'DELETE',
+        });
+        
+        log.info('closeOperation', 'Operation closed');
+        log.traceExit('closeOperation', response);
+        return response;
     }
     
     // Get operation results
     async getOperationResults(sessionHandle: string, operationHandle: string, token: number = 0, rowFormat: string = 'JSON'): Promise<any> {
-        let response;
-        try {
-            // Try with the proper API path format first
-            const endpoint = `/api/${this.apiVersion}/sessions/${sessionHandle}/operations/${operationHandle}/result/${token}?rowFormat=${rowFormat}`;
-            response = await this.request(endpoint);
-        } catch (error) {
-            // Fall back to legacy path format if the first attempt fails
-            const endpoint = `/${this.apiVersion}/sessions/${sessionHandle}/operations/${operationHandle}/result/${token}?rowFormat=${rowFormat}`;
-            response = await this.request(endpoint);
-        }
+        const endpoint = `/${this.apiVersion}/sessions/${sessionHandle}/operations/${operationHandle}/result/${token}?rowFormat=${rowFormat}`;
+        const response = await this.request(endpoint);
         
         // Only log significant events, not every token fetch
         if (token === 0) {
@@ -609,16 +473,6 @@ export class FlinkApiService {
                     // Continue with next token
                 }
                 
-                // Special handling for empty first response
-                if (response.resultType === 'EOS' && 
-                    (!response.results || !response.results.data || response.results.data.length === 0) && 
-                    !response.nextResultUri && 
-                    nextToken === 0 && 
-                    attempts === 1) {
-                    nextToken = 1;
-                    hasMore = true;
-                }
-                
             } catch (error: any) {
                 log.error(`Error fetching results at token ${nextToken}: ${error.message}`, { 
                     operationHandle 
@@ -634,6 +488,54 @@ export class FlinkApiService {
         log.info(`Retrieved ${results.length} rows with ${columns.length} columns for operation ${operationHandle}`);
 
         return { results, columns };
+    }
+
+    // Get all jobs using SQL command through the gateway
+    async getJobsViaSql(sessionHandle: string): Promise<any> {
+        log.traceEnter('getJobsViaSql', { sessionHandle });
+        
+        try {
+            // Submit SHOW JOBS SQL statement
+            const submitResponse = await this.submitStatement(sessionHandle, 'SHOW JOBS');
+            const operationHandle = submitResponse.operationHandle;
+            
+            // Get the results
+            const results = await this.getAllResults(sessionHandle, operationHandle);
+            
+            log.info('getJobsViaSql', `Retrieved ${results.results.length} jobs via SQL`);
+            
+            // Log the raw results structure for debugging
+            log.info('getJobsViaSql', `Raw results structure: ${JSON.stringify(results, null, 2)}`);
+            log.info('getJobsViaSql', `Columns: ${JSON.stringify(results.columns, null, 2)}`);
+            log.info('getJobsViaSql', `Results data: ${JSON.stringify(results.results, null, 2)}`);
+            
+            log.traceExit('getJobsViaSql', results);
+            return results;
+        } catch (error: any) {
+            log.error('getJobsViaSql', `Failed to get jobs via SQL: ${error.message}`);
+            throw error;
+        }
+    }
+
+    // Stop a job using SQL command
+    async stopJobViaSql(sessionHandle: string, jobId: string): Promise<any> {
+        log.traceEnter('stopJobViaSql', { sessionHandle, jobId });
+        
+        try {
+            // Submit STOP JOB SQL statement
+            const submitResponse = await this.submitStatement(sessionHandle, `STOP JOB '${jobId}'`);
+            const operationHandle = submitResponse.operationHandle;
+            
+            // Get the results
+            const results = await this.getAllResults(sessionHandle, operationHandle);
+            
+            log.info('stopJobViaSql', `Job stop command executed for: ${jobId}`);
+            log.traceExit('stopJobViaSql', results);
+            return results;
+        } catch (error: any) {
+            log.error('stopJobViaSql', `Failed to stop job via SQL: ${error.message}`);
+            throw error;
+        }
     }
 
     // Extract root cause from Java exception stack trace

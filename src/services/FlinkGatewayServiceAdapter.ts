@@ -396,4 +396,113 @@ export class FlinkGatewayServiceAdapter {
             throw error;
         }
     }
+
+    // Jobs management methods using SQL commands
+    async getJobs(): Promise<any> {
+        log.traceEnter('getJobs');
+        try {
+            const currentSession = await this.getCurrentSession();
+            if (!currentSession || !currentSession.sessionHandle) {
+                log.warn('getJobs', 'No active session for getting jobs');
+                return [];
+            }
+
+            const results = await this.flinkApi.getJobsViaSql(currentSession.sessionHandle);
+            
+            // Check if we have valid results
+            if (!results || !results.results || !Array.isArray(results.results)) {
+                log.warn('getJobs', 'No valid results returned from SHOW JOBS query');
+                return [];
+            }
+            
+            log.info('getJobs', `Processing ${results.results.length} job rows`);
+            
+            // Transform the SQL results to job objects
+            // The actual data structure has each result as: { kind: "INSERT", fields: [job_id, job_name, status, start_time] }
+            const jobs = results.results.map((result: any, index: number) => {
+                // Extract fields array from the result object
+                const fields = result.fields || [];
+                
+                // Map to expected positions: [job_id, job_name, status, start_time]
+                const jobId = (fields[0] && fields[0] !== '') ? fields[0] : `unknown-job-${index}-${Date.now()}`;
+                const rawJobName = fields[1] || `Unknown Job ${index + 1}`;
+                const jobStatus = fields[2] || 'UNKNOWN';
+                const startTime = fields[3] || 0;
+                
+                // Create a more user-friendly job name from the SQL query
+                let displayName = rawJobName;
+                if (rawJobName.includes('SELECT') && rawJobName.includes('FROM')) {
+                    // Extract table name from SQL query for a cleaner display
+                    const tableMatch = rawJobName.match(/FROM\s+`?([^`\s]+)`?\.`?([^`\s]+)`?\.`?([^`\s]+)`?/i);
+                    if (tableMatch) {
+                        const tableName = tableMatch[3] || tableMatch[2] || tableMatch[1];
+                        displayName = `Query on ${tableName}`;
+                    } else {
+                        displayName = `SQL Query ${jobId.substring(0, 8)}...`;
+                    }
+                }
+                
+                const jobObj = {
+                    jid: jobId,
+                    name: displayName,
+                    state: jobStatus,
+                    'start-time': startTime
+                };
+                
+                log.info('getJobs', `Transformed job ${index}: ${JSON.stringify(jobObj)}`);
+                return jobObj;
+            });
+
+            log.traceExit('getJobs', { jobCount: jobs.length });
+            return jobs;
+        } catch (error: any) {
+            log.error('getJobs', `Failed to get jobs: ${error.message}`);
+            // Return empty array on error to prevent crashes
+            return [];
+        }
+    }
+
+    async stopJob(jobId: string): Promise<any> {
+        log.traceEnter('stopJob', { jobId });
+        try {
+            const currentSession = await this.getCurrentSession();
+            if (!currentSession || !currentSession.sessionHandle) {
+                throw new Error('No active session for stopping job');
+            }
+
+            const response = await this.flinkApi.stopJobViaSql(currentSession.sessionHandle, jobId);
+            log.traceExit('stopJob', response);
+            return response;
+        } catch (error: any) {
+            log.error('stopJob', `Failed to stop job ${jobId}: ${error.message}`);
+            throw error;
+        }
+    }
+
+    async cancelJob(jobId: string): Promise<any> {
+        log.traceEnter('cancelJob', { jobId });
+        try {
+            // For cancel, we might need to use a different SQL command or similar approach
+            // Some Flink versions support CANCEL JOB, others might need different approaches
+            const currentSession = await this.getCurrentSession();
+            if (!currentSession || !currentSession.sessionHandle) {
+                throw new Error('No active session for cancelling job');
+            }
+
+            // Try CANCEL JOB first, fall back to STOP JOB if not supported
+            try {
+                const submitResponse = await this.flinkApi.submitStatement(currentSession.sessionHandle, `CANCEL JOB '${jobId}'`);
+                const operationHandle = submitResponse.operationHandle;
+                const results = await this.flinkApi.getAllResults(currentSession.sessionHandle, operationHandle);
+                log.traceExit('cancelJob', results);
+                return results;
+            } catch (cancelError: any) {
+                log.warn('cancelJob', `CANCEL JOB not supported, falling back to STOP JOB: ${cancelError.message}`);
+                return await this.stopJob(jobId);
+            }
+        } catch (error: any) {
+            log.error('cancelJob', `Failed to cancel job ${jobId}: ${error.message}`);
+            throw error;
+        }
+    }
 }

@@ -216,6 +216,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             }
         }),
 
+        vscode.commands.registerCommand('flink-sql-workbench.cancelJob', async (item) => {
+            if (item && item.job && item.job.id) {
+                await jobsProvider.cancelJob(item.job.id);
+            }
+        }),
+
+        vscode.commands.registerCommand('flink-sql-workbench.viewJobDetails', async (item) => {
+            if (item && item.job) {
+                await showJobDetails(item.job);
+            }
+        }),
+
         // Query execution commands
         vscode.commands.registerCommand('flink-sql-workbench.executeQuery', async () => {
             const editor = vscode.window.activeTextEditor;
@@ -439,6 +451,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     context.subscriptions.push(...commands);
     
     console.log('Flink SQL Workbench extension activated successfully');
+}
+
+async function showJobDetails(job: any): Promise<void> {
+    const details = `Job Details
+
+Job ID: ${job.id}
+Name: ${job.name}
+Status: ${job.status}
+Start Time: ${job.startTime ? new Date(job.startTime).toLocaleString() : 'N/A'}
+Duration: ${job.duration || 'Unknown'}
+
+Additional Information:
+- End Time: ${job.endTime ? new Date(job.endTime).toLocaleString() : 'N/A'}
+- Last Modification: ${job.lastModification ? new Date(job.lastModification).toLocaleString() : 'N/A'}`;
+
+    // Show job details in a new untitled document
+    const doc = await vscode.workspace.openTextDocument({
+        content: details,
+        language: 'plaintext'
+    });
+    
+    await vscode.window.showTextDocument(doc);
 }
 
 export function deactivate(): void {

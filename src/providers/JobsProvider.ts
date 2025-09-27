@@ -2,6 +2,9 @@ import * as vscode from 'vscode';
 import { FlinkGatewayServiceAdapter } from '../services/FlinkGatewayServiceAdapter';
 import { FlinkJob, BaseTreeItem } from '../types';
 import { BaseTreeDataProvider, NotificationService, ConfigurationManager, ErrorHandler } from '../utils/base';
+import { createModuleLogger } from '../services/logger';
+
+const log = createModuleLogger('JobsProvider');
 
 interface JobItem extends BaseTreeItem {
     job: FlinkJob;
@@ -49,9 +52,43 @@ export class JobsProvider extends BaseTreeDataProvider<JobItem | JobGroupItem> {
     }
 
     private async getJobsFromGateway(): Promise<FlinkJob[]> {
-        // Placeholder implementation - replace with actual gateway service call
-        // return await this.gatewayService.getJobs();
-        return [];
+        try {
+            const jobs = await this.gatewayService.getJobs();
+            log.info('getJobsFromGateway', `Retrieved ${jobs.length} jobs from gateway`);
+            
+            // Transform the response to FlinkJob format with guaranteed unique IDs
+            const usedIds = new Set<string>();
+            let duplicateCounter = 0;
+            
+            return jobs.map((job: any, index: number) => {
+                // Ensure we always have a valid, unique ID
+                let jobId = job.jid || job.id || `job-${index}-${Date.now()}`;
+                
+                // Handle duplicate IDs by adding a suffix
+                while (usedIds.has(jobId)) {
+                    duplicateCounter++;
+                    jobId = `${job.jid || job.id || `job-${index}`}-dup-${duplicateCounter}`;
+                }
+                usedIds.add(jobId);
+                
+                return {
+                    id: jobId,
+                    name: job.name || `Job ${jobId}`,
+                    status: job.state || job.status || 'UNKNOWN',
+                    startTime: job['start-time'] || job.startTime || 0,
+                    endTime: job['end-time'] || job.endTime,
+                    duration: job.duration || 0,
+                    lastModification: job['last-modification'] || job.lastModification || 0,
+                    tasks: job.tasks || {},
+                    vertices: job.vertices || [],
+                    plan: job.plan || {}
+                } as FlinkJob;
+            });
+        } catch (error: any) {
+            log.error('getJobsFromGateway', `Failed to get jobs: ${error.message}`);
+            // Return empty array on error to prevent crashes
+            return [];
+        }
     }
 
     getTreeItem(element: JobItem | JobGroupItem): vscode.TreeItem {
@@ -68,6 +105,19 @@ export class JobsProvider extends BaseTreeDataProvider<JobItem | JobGroupItem> {
         if (!element) {
             // Root level - return jobs grouped by status
             return Promise.resolve(this.createGroupedJobItems());
+        } else if ('jobCount' in element) {
+            // This is a group, return the jobs for this group
+            const status = element.status;
+            const jobsForGroup = this.jobs.filter(job => {
+                if (status === 'CANCELLED') {
+                    return job.status === 'CANCELED' || job.status === 'CANCELLED';
+                } else if (status === 'OTHER') {
+                    return !['RUNNING', 'FINISHED', 'CANCELED', 'CANCELLED', 'FAILED'].includes(job.status);
+                }
+                return job.status === status;
+            });
+            
+            return Promise.resolve(jobsForGroup.map(job => this.createJobItem(job)));
         }
         return Promise.resolve([]);
     }
@@ -95,11 +145,8 @@ export class JobsProvider extends BaseTreeDataProvider<JobItem | JobGroupItem> {
                     description: `${jobs.length} job${jobs.length === 1 ? '' : 's'}`,
                     contextValue: 'jobGroup',
                     iconPath: new vscode.ThemeIcon(icon),
-                    collapsibleState: vscode.TreeItemCollapsibleState.None
+                    collapsibleState: vscode.TreeItemCollapsibleState.Collapsed
                 });
-                
-                // Add individual jobs
-                items.push(...jobs.map(job => this.createJobItem(job)));
             }
         };
 
@@ -133,14 +180,38 @@ export class JobsProvider extends BaseTreeDataProvider<JobItem | JobGroupItem> {
         const statusIcon = this.getStatusIcon(job.status);
         const duration = job.duration || 'Unknown';
         
+        // Ensure unique ID for tree item registration
+        const itemId = `job-item-${job.id}`;
+        
+        // Set contextValue based on job status for menu actions
+        let contextValue: string;
+        switch (job.status.toLowerCase()) {
+            case 'running':
+                contextValue = 'runningJob';
+                break;
+            case 'canceled':
+            case 'cancelled':
+                contextValue = 'cancelledJob';
+                break;
+            case 'finished':
+                contextValue = 'finishedJob';
+                break;
+            case 'failed':
+                contextValue = 'failedJob';
+                break;
+            default:
+                contextValue = 'job';
+                break;
+        }
+        
         return {
-            id: job.id,
+            id: itemId,
             label: job.name || job.id,
             type: 'job',
             job,
             description: `${job.status} • ${duration}`,
             tooltip: `Job: ${job.name || job.id}\nStatus: ${job.status}\nStart: ${job.startTime}\nDuration: ${duration}`,
-            contextValue: `job-${job.status.toLowerCase()}`,
+            contextValue: contextValue,
             iconPath: new vscode.ThemeIcon(statusIcon),
             collapsibleState: vscode.TreeItemCollapsibleState.None
         };
@@ -159,12 +230,22 @@ export class JobsProvider extends BaseTreeDataProvider<JobItem | JobGroupItem> {
 
     async stopJob(jobId: string): Promise<void> {
         await ErrorHandler.withErrorHandling(async () => {
-            // Placeholder implementation
-            // await this.gatewayService.stopJob(jobId);
+            log.info('stopJob', `Stopping job: ${jobId}`);
+            await this.gatewayService.stopJob(jobId);
             
             await NotificationService.showInfo(`Job ${jobId} stop command sent`);
             this.refresh();
         }, `Stopping job ${jobId}`);
+    }
+
+    async cancelJob(jobId: string): Promise<void> {
+        await ErrorHandler.withErrorHandling(async () => {
+            log.info('cancelJob', `Cancelling job: ${jobId}`);
+            await this.gatewayService.cancelJob(jobId);
+            
+            await NotificationService.showInfo(`Job ${jobId} cancel command sent`);
+            this.refresh();
+        }, `Cancelling job ${jobId}`);
     }
 
     async toggleAutoRefresh(): Promise<void> {

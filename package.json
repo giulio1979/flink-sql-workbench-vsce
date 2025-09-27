@@ -2,7 +2,7 @@
   "name": "flink-sql-workbench",
   "displayName": "Flink SQL Workbench",
   "description": "VS Code extension for editing and executing Flink SQL with gateway session management (Avichay Marciano, Iulius Hutuleac)",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -142,6 +142,16 @@
         "command": "flink-sql-workbench.stopJob",
         "title": "Stop Job",
         "icon": "$(debug-stop)"
+      },
+      {
+        "command": "flink-sql-workbench.cancelJob",
+        "title": "Cancel Job",
+        "icon": "$(close)"
+      },
+      {
+        "command": "flink-sql-workbench.viewJobDetails",
+        "title": "View Job Details",
+        "icon": "$(info)"
       },
       {
         "command": "flink-sql-workbench.openSettings",
@@ -335,7 +345,23 @@
         },
         {
           "command": "flink-sql-workbench.stopJob",
-          "when": "view == flinkSqlJobs && viewItem == runningJob"
+          "when": "view == flinkSqlJobs && viewItem == runningJob",
+          "group": "jobActions@1"
+        },
+        {
+          "command": "flink-sql-workbench.stopJob",
+          "when": "view == flinkSqlJobs && viewItem == runningJob",
+          "group": "inline@1"
+        },
+        {
+          "command": "flink-sql-workbench.cancelJob",
+          "when": "view == flinkSqlJobs && viewItem == runningJob",
+          "group": "jobActions@2"
+        },
+        {
+          "command": "flink-sql-workbench.viewJobDetails",
+          "when": "view == flinkSqlJobs && (viewItem == runningJob || viewItem == finishedJob || viewItem == cancelledJob || viewItem == failedJob)",
+          "group": "jobInfo@1"
         }
       ]
     },
